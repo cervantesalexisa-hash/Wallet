@@ -1,0 +1,1487 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+  <meta name="apple-mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-status-bar-style" content="default"/>
+  <meta name="theme-color" content="#F2F2F7"/>
+  <title>Finanzas Personales</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box;}
+    html,body{height:100%;background:#F2F2F7;}
+    body{font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',sans-serif;-webkit-font-smoothing:antialiased;}
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useEffect } = React;
+
+// ─── CONSTANTS ────────────────────────────────────────────
+const CARD_THEMES = [
+  { bg: ["#1C1C1E","#2C2C2E"], bar: "#FFD60A",  name: "Grafito"   },
+  { bg: ["#0A3055","#1a5276"], bar: "#4FC3F7",  name: "Zafiro"    },
+  { bg: ["#1A3A2A","#27714f"], bar: "#34C759",  name: "Esmeralda" },
+  { bg: ["#3A1A2A","#7b2d4e"], bar: "#FF6B9D",  name: "Rubí"      },
+  { bg: ["#2A1A3A","#5e2d8e"], bar: "#BF5AF2",  name: "Amatista"  },
+  { bg: ["#3A2800","#7a5200"], bar: "#FF9F0A",  name: "Ámbar"     },
+];
+
+const CATEGORIES = [
+  "🛒 Supermercado","🍽️ Comida","⛽ Gasolina","🚗 Auto","🏥 Salud",
+  "🎬 Entretenimiento","👕 Ropa","🏠 Hogar","🔧 Servicios",
+  "✈️ Viajes","🎓 Educación","💊 Farmacia","📦 Otro"
+];
+
+const DEBT_CATS = [
+  "🏦 Préstamo","🏠 Renta","🚗 Auto","💳 Tarjeta","🎓 Educación",
+  "🏥 Médico","⚡ Servicios","👨‍👩‍👧 Familiar","📱 Suscripción","📦 Otro"
+];
+
+const MONTHS_ES = ["Enero","Febrero","Marzo","Abril","Mayo","Junio",
+  "Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
+
+const MX = n => new Intl.NumberFormat("es-MX",{style:"currency",currency:"MXN",minimumFractionDigits:2}).format(n||0);
+function todayStr(){ return new Date().toISOString().split("T")[0]; }
+
+function getCycleLabel(dateStr, cutDay) {
+  if (!dateStr || !cutDay) return "current";
+  const now   = new Date();
+  const today = now.getDate();
+  const date  = new Date(dateStr + "T12:00:00");
+  let cycleStart, cycleEnd;
+  if (today <= cutDay) {
+    cycleEnd   = new Date(now.getFullYear(), now.getMonth(), cutDay);
+    cycleStart = new Date(now.getFullYear(), now.getMonth() - 1, cutDay + 1);
+  } else {
+    cycleEnd   = new Date(now.getFullYear(), now.getMonth() + 1, cutDay);
+    cycleStart = new Date(now.getFullYear(), now.getMonth(), cutDay + 1);
+  }
+  if (date >= cycleStart && date <= cycleEnd) return "current";
+  if (date > cycleEnd) return "next";
+  return "past";
+}
+
+function daysUntilPay(payDay) {
+  const now  = new Date();
+  let   next = new Date(now.getFullYear(), now.getMonth(), payDay);
+  if (next <= now) next = new Date(now.getFullYear(), now.getMonth() + 1, payDay);
+  return Math.ceil((next - now) / 86400000);
+}
+
+function daysUntilCut(cutDay) {
+  const now  = new Date();
+  let   next = new Date(now.getFullYear(), now.getMonth(), cutDay);
+  if (next <= now) next = new Date(now.getFullYear(), now.getMonth() + 1, cutDay);
+  return Math.ceil((next - now) / 86400000);
+}
+
+function cycleProgress(cutDay) {
+  if (!cutDay) return { pct: 0, cycleStart: null, cycleEnd: null, pastCut: false };
+  const now   = new Date();
+  const today = now.getDate();
+  const pastCut = today > cutDay;
+  let cycleStart, cycleEnd;
+  if (!pastCut) {
+    cycleEnd   = new Date(now.getFullYear(), now.getMonth(), cutDay);
+    cycleStart = new Date(now.getFullYear(), now.getMonth() - 1, cutDay + 1);
+  } else {
+    cycleEnd   = new Date(now.getFullYear(), now.getMonth() + 1, cutDay);
+    cycleStart = new Date(now.getFullYear(), now.getMonth(), cutDay + 1);
+  }
+  const total = cycleEnd - cycleStart;
+  const elapsed = now - cycleStart;
+  const pct = Math.min(100, Math.max(0, (elapsed / total) * 100));
+  return { pct, cycleStart, cycleEnd, pastCut };
+}
+
+function fmtShort(date) {
+  if (!date) return "";
+  const M = ["ene","feb","mar","abr","may","jun","jul","ago","sep","oct","nov","dic"];
+  return `${date.getDate()} ${M[date.getMonth()]}`;
+}
+
+function fmtDate(str){
+  if(!str) return "";
+  const [y,m,d] = str.split("-");
+  const M = ["ene","feb","mar","abr","may","jun","jul","ago","sep","oct","nov","dic"];
+  return `${parseInt(d)} ${M[parseInt(m)-1]} ${y}`;
+}
+
+function monthKey(offset = 0) {
+  const d = new Date();
+  d.setMonth(d.getMonth() + offset);
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
+}
+function monthLabel(ym) {
+  const [y, m] = ym.split("-");
+  return `${MONTHS_ES[parseInt(m)-1]} ${y}`;
+}
+
+function useLS(key, init){
+  const [v,setV] = useState(()=>{ try{ const s=localStorage.getItem(key); return s?JSON.parse(s):init; }catch{ return init; }});
+  useEffect(()=>{ localStorage.setItem(key,JSON.stringify(v)); },[key,v]);
+  return [v,setV];
+}
+
+function healthScore(cards){
+  if(!cards.length) return 100;
+  const lim = cards.reduce((s,c)=>s+c.limit+(c.limitExt||0),0);
+  if(!lim) return 100;
+  const used = cards.reduce((s,c)=>{
+    const g=(c.expenses||[]).filter(e=>!e.paid&&getCycleLabel(e.date,c.cutDay)==="current"&&!e.alreadyInBalance).reduce((a,e)=>a+e.amount,0);
+    const m=(c.deferred||[]).filter(d=>!d.paid&&!d.alreadyInBalance).reduce((a,d)=>a+d.monthlyAmt,0);
+    return s+(c.limit+(c.limitExt||0)-(c.available||0))+g+m;
+  },0);
+  const p=used/lim;
+  if(p<0.3) return 95; if(p<0.5) return 80; if(p<0.7) return 60; if(p<0.9) return 35; return 15;
+}
+
+// ─── THEME GRADIENT ───────────────────────────────────────
+function themeBg(theme) {
+  return `linear-gradient(135deg, ${theme.bg[0]} 0%, ${theme.bg[1]} 100%)`;
+}
+
+// ─── SHARED STYLES ────────────────────────────────────────
+const S = {
+  inp: {
+    display:"block", width:"100%", padding:"13px 15px", fontSize:15,
+    background:"#F2F2F7", border:"none", borderRadius:13,
+    color:"#1C1C1E", outline:"none", boxSizing:"border-box", fontFamily:"inherit",
+    WebkitAppearance:"none", appearance:"none",
+  },
+  label: {
+    display:"block", fontSize:12, fontWeight:600, color:"#8E8E93",
+    letterSpacing:0.4, marginBottom:6,
+  },
+  card: {
+    background:"#fff", borderRadius:16, overflow:"hidden",
+    boxShadow:"0 1px 3px rgba(0,0,0,0.06), 0 2px 8px rgba(0,0,0,0.04)",
+  },
+  row: {
+    display:"flex", alignItems:"center", padding:"14px 16px",
+    borderBottom:"1px solid #F2F2F7",
+  },
+};
+
+function Field({label, children, hint}){
+  return(
+    <div style={{marginBottom:18}}>
+      <label style={S.label}>{label}</label>
+      {children}
+      {hint && <p style={{color:"#8E8E93",fontSize:11,margin:"6px 0 0",lineHeight:1.5}}>{hint}</p>}
+    </div>
+  );
+}
+
+function Btn({children,onClick,variant="primary",full=false,small=false,style:sx={}}){
+  const base={
+    padding: small?"9px 18px":"14px 0",
+    border:"none", borderRadius:14, fontSize:small?14:16,
+    fontWeight:700, cursor:"pointer", fontFamily:"inherit",
+    width:full?"100%":"auto", flex:full?undefined:1,
+    transition:"opacity 0.15s, transform 0.1s", ...sx
+  };
+  const t={
+    primary:{background:"#007AFF",color:"#fff"},
+    secondary:{background:"#F2F2F7",color:"#1C1C1E"},
+    danger:{background:"#FF3B30",color:"#fff"},
+    purple:{background:"#AF52DE",color:"#fff"},
+    green:{background:"#34C759",color:"#fff"},
+    teal:{background:"#32ADE6",color:"#fff"},
+  };
+  return(
+    <button style={{...base,...t[variant]}} onClick={onClick}
+      onMouseDown={e=>e.currentTarget.style.transform="scale(0.96)"}
+      onMouseUp={e=>e.currentTarget.style.transform="scale(1)"}>
+      {children}
+    </button>
+  );
+}
+
+// ─── MODAL ────────────────────────────────────────────────
+function Modal({title, onClose, children}){
+  return(
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.45)",zIndex:300,
+      display:"flex",alignItems:"flex-end",justifyContent:"center",
+      backdropFilter:"blur(8px)",WebkitBackdropFilter:"blur(8px)"}}>
+      <div style={{background:"#F2F2F7",borderRadius:"24px 24px 0 0",width:"100%",
+        maxWidth:520,maxHeight:"93vh",overflowY:"auto",paddingBottom:48}}>
+        <div style={{background:"#F2F2F7",position:"sticky",top:0,zIndex:1,
+          display:"flex",alignItems:"center",justifyContent:"space-between",
+          padding:"20px 20px 14px",borderBottom:"1px solid rgba(0,0,0,0.06)"}}>
+          <span style={{fontSize:18,fontWeight:700,color:"#1C1C1E"}}>{title}</span>
+          <button onClick={onClose} style={{background:"#E5E5EA",border:"none",
+            color:"#1C1C1E",borderRadius:99,width:30,height:30,fontSize:17,
+            cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",
+            fontWeight:700}}>×</button>
+        </div>
+        <div style={{padding:"20px 20px 0"}}>{children}</div>
+      </div>
+    </div>
+  );
+}
+
+// ─── CARD FORM ────────────────────────────────────────────
+function CardForm({initial, onSave, onClose, onDelete}){
+  const [name,setName]         = useState(initial?.name||"");
+  const [limit,setLimit]       = useState(initial?.limit||"");
+  const [limitExt,setLimitExt] = useState(initial?.limitExt||"");
+  const [available,setAvail]   = useState(initial?.available||"");
+  const [cutDay,setCutDay]     = useState(initial?.cutDay||"");
+  const [payDay,setPayDay]     = useState(initial?.payDay||"");
+  const [themeIdx,setTheme]    = useState(initial?.themeIdx??0);
+
+  function save(){
+    if(!name||!limit) return;
+    const cut = parseInt(cutDay)||1;
+    const pay = parseInt(payDay)||cut;
+    onSave({name, limit:parseFloat(limit), limitExt:parseFloat(limitExt)||0,
+      available:parseFloat(available)||0, cutDay:cut, payDay:pay, themeIdx});
+  }
+
+  const theme = CARD_THEMES[themeIdx];
+
+  return(
+    <Modal title={initial?"Editar tarjeta":"Nueva tarjeta"} onClose={onClose}>
+      {/* Color picker con preview */}
+      <div style={{background:themeBg(theme),borderRadius:18,padding:"18px 20px",marginBottom:20,
+        boxShadow:`0 8px 32px ${theme.bg[0]}66`}}>
+        <p style={{color:"rgba(255,255,255,0.5)",fontSize:11,fontWeight:700,
+          letterSpacing:0.8,textTransform:"uppercase",margin:"0 0 4px"}}>Vista previa</p>
+        <p style={{color:"#fff",fontSize:20,fontWeight:800,margin:0}}>{name||"Mi Tarjeta"}</p>
+        <div style={{display:"flex",gap:8,marginTop:14,flexWrap:"wrap"}}>
+          {CARD_THEMES.map((t,i)=>(
+            <div key={i} onClick={()=>setTheme(i)}
+              style={{width:32,height:32,borderRadius:16,
+                background:themeBg(t),cursor:"pointer",
+                border:themeIdx===i?`3px solid #fff`:"3px solid transparent",
+                boxSizing:"border-box",transition:"all 0.15s",
+                boxShadow:themeIdx===i?"0 0 0 2px rgba(0,0,0,0.3)":"none"}}/>
+          ))}
+        </div>
+      </div>
+
+      <div style={{background:"#fff",borderRadius:16,overflow:"hidden",marginBottom:16}}>
+        {[
+          {label:"Nombre",      ph:"ej. BBVA Azul",  val:name,      set:setName,  type:"text"},
+          {label:"Crédito total",ph:"47100",          val:limit,     set:setLimit, type:"number"},
+          {label:"Extensión",   ph:"0.00 (opcional)", val:limitExt,  set:setLimitExt,type:"number"},
+          {label:"Disponible",  ph:"ej. 34577.57",   val:available, set:setAvail, type:"number"},
+        ].map((f,i,arr)=>(
+          <div key={f.label} style={{padding:"13px 15px",
+            borderBottom:i<arr.length-1?"1px solid #F2F2F7":"none"}}>
+            <p style={{color:"#8E8E93",fontSize:11,fontWeight:600,margin:"0 0 3px"}}>{f.label}</p>
+            <input style={{display:"block",width:"100%",border:"none",outline:"none",
+              fontSize:16,fontWeight:500,color:"#1C1C1E",fontFamily:"inherit",
+              background:"transparent",padding:0,WebkitAppearance:"none"}}
+              type={f.type} placeholder={f.ph} value={f.val}
+              onChange={e=>f.set(e.target.value)}/>
+          </div>
+        ))}
+      </div>
+
+      <div style={{background:"#fff",borderRadius:16,overflow:"hidden",marginBottom:20}}>
+        {[
+          {label:"✂️ Día de corte",ph:"ej. 10",val:cutDay,set:setCutDay,hint:"Cierra el ciclo"},
+          {label:"💳 Día de pago", ph:"ej. 30",val:payDay,set:setPayDay,hint:"Límite sin intereses"},
+        ].map((f,i)=>(
+          <div key={f.label} style={{padding:"13px 15px",
+            borderBottom:i===0?"1px solid #F2F2F7":"none"}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <div>
+                <p style={{color:"#8E8E93",fontSize:11,fontWeight:600,margin:"0 0 2px"}}>{f.label}</p>
+                <p style={{color:"#C7C7CC",fontSize:10,margin:0}}>{f.hint}</p>
+              </div>
+              <input style={{width:60,border:"none",outline:"none",fontSize:16,fontWeight:700,
+                color:"#1C1C1E",textAlign:"right",fontFamily:"inherit",
+                background:"transparent",WebkitAppearance:"none"}}
+                type="number" min="1" max="31" placeholder="—"
+                value={f.val} onChange={e=>f.set(e.target.value)}/>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div style={{display:"flex",gap:10,marginTop:4}}>
+        <Btn variant="secondary" onClick={onClose}>Cancelar</Btn>
+        <Btn onClick={save}>Guardar</Btn>
+      </div>
+      {initial&&(
+        <div style={{marginTop:10}}>
+          <Btn variant="danger" full onClick={onDelete}>Eliminar tarjeta</Btn>
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+// ─── EXPENSE FORM ─────────────────────────────────────────
+function ExpenseForm({onSave, onClose, cutDay}){
+  const [desc,setDesc]           = useState("");
+  const [amount,setAmt]          = useState("");
+  const [date,setDate]           = useState(todayStr());
+  const [cat,setCat]             = useState(CATEGORIES[12]);
+  const [note,setNote]           = useState("");
+  const [inBalance,setInBalance] = useState(false);
+
+  const cycle = getCycleLabel(date, cutDay);
+  const cycleMsg = cycle === "next"
+    ? `⚡ Va al siguiente estado de cuenta`
+    : cycle === "past" ? "⏮ Ciclo anterior" : null;
+
+  return(
+    <Modal title="Agregar gasto" onClose={onClose}>
+      <div style={{background:"#fff",borderRadius:16,overflow:"hidden",marginBottom:16}}>
+        {[
+          {label:"Descripción",val:desc,set:setDesc,ph:"ej. Soriana",type:"text"},
+          {label:"Monto",      val:amount,set:setAmt,ph:"214.22",type:"number"},
+          {label:"Nota",       val:note, set:setNote,ph:"opcional",type:"text"},
+        ].map((f,i,arr)=>(
+          <div key={f.label} style={{padding:"13px 15px",borderBottom:i<arr.length-1?"1px solid #F2F2F7":"none"}}>
+            <p style={{color:"#8E8E93",fontSize:11,fontWeight:600,margin:"0 0 3px"}}>{f.label}</p>
+            <input style={{display:"block",width:"100%",border:"none",outline:"none",
+              fontSize:16,fontWeight:500,color:"#1C1C1E",fontFamily:"inherit",
+              background:"transparent",padding:0,WebkitAppearance:"none"}}
+              type={f.type} placeholder={f.ph} value={f.val} onChange={e=>f.set(e.target.value)}/>
+          </div>
+        ))}
+        <div style={{padding:"13px 15px",borderBottom:"1px solid #F2F2F7"}}>
+          <p style={{color:"#8E8E93",fontSize:11,fontWeight:600,margin:"0 0 6px"}}>Categoría</p>
+          <select style={{display:"block",width:"100%",border:"none",outline:"none",
+            fontSize:15,color:"#1C1C1E",fontFamily:"inherit",background:"transparent",
+            WebkitAppearance:"none",appearance:"none"}}
+            value={cat} onChange={e=>setCat(e.target.value)}>
+            {CATEGORIES.map(c=><option key={c} value={c}>{c}</option>)}
+          </select>
+        </div>
+        <div style={{padding:"13px 15px",borderBottom:"1px solid #F2F2F7"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <div>
+              <p style={{color:"#8E8E93",fontSize:11,fontWeight:600,margin:"0 0 2px"}}>Fecha</p>
+              {cycleMsg&&<p style={{color:cycle==="next"?"#007AFF":"#FF9F0A",fontSize:11,fontWeight:600,margin:0}}>{cycleMsg}</p>}
+            </div>
+            <input style={{border:"none",outline:"none",fontSize:15,fontWeight:500,
+              color:"#1C1C1E",fontFamily:"inherit",background:"transparent",
+              colorScheme:"light",WebkitAppearance:"none"}}
+              type="date" value={date} onChange={e=>setDate(e.target.value)}/>
+          </div>
+        </div>
+        <div style={{padding:"13px 15px"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <div>
+              <p style={{color:"#1C1C1E",fontSize:14,fontWeight:500,margin:"0 0 2px"}}>¿Ya en saldo del banco?</p>
+              <p style={{color:"#8E8E93",fontSize:11,margin:0}}>Evita contarlo dos veces</p>
+            </div>
+            <div onClick={()=>setInBalance(!inBalance)}
+              style={{width:52,height:30,borderRadius:15,background:inBalance?"#34C759":"#E5E5EA",
+                position:"relative",cursor:"pointer",transition:"background 0.25s",flexShrink:0}}>
+              <div style={{position:"absolute",top:3,left:inBalance?25:3,width:24,height:24,
+                borderRadius:12,background:"#fff",boxShadow:"0 2px 6px rgba(0,0,0,0.2)",transition:"left 0.25s"}}/>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div style={{display:"flex",gap:10}}>
+        <Btn variant="secondary" onClick={onClose}>Cancelar</Btn>
+        <Btn onClick={()=>{
+          if(!desc||!amount) return;
+          onSave({id:Date.now(),desc,amount:parseFloat(amount),date,cat,note,paid:false,alreadyInBalance:inBalance});
+        }}>Agregar</Btn>
+      </div>
+    </Modal>
+  );
+}
+
+// ─── DEFERRED FORM ────────────────────────────────────────
+function DeferredForm({onSave,onClose}){
+  const [desc,setDesc]          = useState("");
+  const [monthlyAmt,setAmt]     = useState("");
+  const [current,setCurrent]    = useState("");
+  const [total,setTotal]        = useState("");
+  const [dueMonth,setDueMonth]  = useState("");
+  const [inBalance,setInBalance]= useState(true);
+
+  return(
+    <Modal title="Agregar MSI / Diferido" onClose={onClose}>
+      <div style={{background:"#fff",borderRadius:16,overflow:"hidden",marginBottom:16}}>
+        {[
+          {label:"Descripción",val:desc,set:setDesc,ph:"ej. Laptop, Viaje...",type:"text"},
+          {label:"Cuota mensual",val:monthlyAmt,set:setAmt,ph:"764.00",type:"number"},
+          {label:"Cuota actual", val:current,set:setCurrent,ph:"ej. 3",type:"number"},
+          {label:"Total cuotas", val:total,set:setTotal,ph:"ej. 12",type:"number"},
+        ].map((f,i,arr)=>(
+          <div key={f.label} style={{padding:"13px 15px",borderBottom:i<arr.length-1?"1px solid #F2F2F7":"none"}}>
+            <p style={{color:"#8E8E93",fontSize:11,fontWeight:600,margin:"0 0 3px"}}>{f.label}</p>
+            <input style={{display:"block",width:"100%",border:"none",outline:"none",
+              fontSize:16,fontWeight:500,color:"#1C1C1E",fontFamily:"inherit",
+              background:"transparent",padding:0,WebkitAppearance:"none"}}
+              type={f.type} placeholder={f.ph} value={f.val} onChange={e=>f.set(e.target.value)}/>
+          </div>
+        ))}
+        <div style={{padding:"13px 15px",borderBottom:"1px solid #F2F2F7"}}>
+          <p style={{color:"#8E8E93",fontSize:11,fontWeight:600,margin:"0 0 6px"}}>Mes de vencimiento</p>
+          <select style={{display:"block",width:"100%",border:"none",outline:"none",
+            fontSize:15,color:"#1C1C1E",fontFamily:"inherit",background:"transparent",
+            WebkitAppearance:"none",appearance:"none"}}
+            value={dueMonth} onChange={e=>setDueMonth(e.target.value)}>
+            <option value="">— Selecciona —</option>
+            {MONTHS_ES.map(m=><option key={m} value={m}>{m}</option>)}
+          </select>
+        </div>
+        <div style={{padding:"13px 15px"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <div>
+              <p style={{color:"#1C1C1E",fontSize:14,fontWeight:500,margin:"0 0 2px"}}>¿Ya reflejado en saldo?</p>
+              <p style={{color:"#8E8E93",fontSize:11,margin:0}}>El banco ya lo descontó</p>
+            </div>
+            <div onClick={()=>setInBalance(!inBalance)}
+              style={{width:52,height:30,borderRadius:15,background:inBalance?"#34C759":"#E5E5EA",
+                position:"relative",cursor:"pointer",transition:"background 0.25s",flexShrink:0}}>
+              <div style={{position:"absolute",top:3,left:inBalance?25:3,width:24,height:24,
+                borderRadius:12,background:"#fff",boxShadow:"0 2px 6px rgba(0,0,0,0.2)",transition:"left 0.25s"}}/>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div style={{display:"flex",gap:10}}>
+        <Btn variant="secondary" onClick={onClose}>Cancelar</Btn>
+        <Btn onClick={()=>{
+          if(!monthlyAmt||!total) return;
+          onSave({id:Date.now(),desc,monthlyAmt:parseFloat(monthlyAmt),
+            currentInstall:parseInt(current)||1,totalInstall:parseInt(total),
+            dueMonth,paid:false,alreadyInBalance:inBalance});
+        }}>Agregar</Btn>
+      </div>
+    </Modal>
+  );
+}
+
+// ─── FUTURE DEBT FORM ─────────────────────────────────────
+function DebtForm({initial, onSave, onClose, onDelete}){
+  const now = new Date();
+  const defaultYM = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`;
+  const [desc,setDesc]           = useState(initial?.desc||"");
+  const [amount,setAmt]          = useState(initial?.amount||"");
+  const [cat,setCat]             = useState(initial?.cat||DEBT_CATS[0]);
+  const [yearMonth,setYM]        = useState(initial?.yearMonth||defaultYM);
+  const [recurring,setRecurring] = useState(initial?.recurring||false);
+  const [recurMonths,setRM]      = useState(initial?.recurMonths||"");
+  const [note,setNote]           = useState(initial?.note||"");
+
+  return(
+    <Modal title={initial?"Editar compromiso":"Nuevo compromiso"} onClose={onClose}>
+      <div style={{background:"#fff",borderRadius:16,overflow:"hidden",marginBottom:16}}>
+        {[
+          {label:"Descripción",val:desc,set:setDesc,ph:"ej. Préstamo personal",type:"text"},
+          {label:"Monto",      val:amount,set:setAmt,ph:"3500.00",type:"number"},
+          {label:"Nota",       val:note,set:setNote,ph:"opcional",type:"text"},
+        ].map((f,i,arr)=>(
+          <div key={f.label} style={{padding:"13px 15px",borderBottom:i<arr.length-1?"1px solid #F2F2F7":"none"}}>
+            <p style={{color:"#8E8E93",fontSize:11,fontWeight:600,margin:"0 0 3px"}}>{f.label}</p>
+            <input style={{display:"block",width:"100%",border:"none",outline:"none",
+              fontSize:16,fontWeight:500,color:"#1C1C1E",fontFamily:"inherit",
+              background:"transparent",padding:0,WebkitAppearance:"none"}}
+              type={f.type} placeholder={f.ph} value={f.val} onChange={e=>f.set(e.target.value)}/>
+          </div>
+        ))}
+        <div style={{padding:"13px 15px",borderBottom:"1px solid #F2F2F7"}}>
+          <p style={{color:"#8E8E93",fontSize:11,fontWeight:600,margin:"0 0 6px"}}>Categoría</p>
+          <select style={{display:"block",width:"100%",border:"none",outline:"none",
+            fontSize:15,color:"#1C1C1E",fontFamily:"inherit",background:"transparent",
+            WebkitAppearance:"none",appearance:"none"}}
+            value={cat} onChange={e=>setCat(e.target.value)}>
+            {DEBT_CATS.map(c=><option key={c} value={c}>{c}</option>)}
+          </select>
+        </div>
+        <div style={{padding:"13px 15px",borderBottom:"1px solid #F2F2F7"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <p style={{color:"#8E8E93",fontSize:11,fontWeight:600,margin:0}}>Mes de pago</p>
+            <input style={{border:"none",outline:"none",fontSize:15,
+              color:"#1C1C1E",fontFamily:"inherit",background:"transparent",
+              colorScheme:"light",WebkitAppearance:"none"}}
+              type="month" value={yearMonth} onChange={e=>setYM(e.target.value)}/>
+          </div>
+        </div>
+        <div style={{padding:"13px 15px",borderBottom:recurring?"1px solid #F2F2F7":"none"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <div>
+              <p style={{color:"#1C1C1E",fontSize:14,fontWeight:500,margin:"0 0 1px"}}>¿Pago mensual?</p>
+              <p style={{color:"#8E8E93",fontSize:11,margin:0}}>Se repite cada mes</p>
+            </div>
+            <div onClick={()=>setRecurring(!recurring)}
+              style={{width:52,height:30,borderRadius:15,background:recurring?"#007AFF":"#E5E5EA",
+                position:"relative",cursor:"pointer",transition:"background 0.25s",flexShrink:0}}>
+              <div style={{position:"absolute",top:3,left:recurring?25:3,width:24,height:24,
+                borderRadius:12,background:"#fff",boxShadow:"0 2px 6px rgba(0,0,0,0.2)",transition:"left 0.25s"}}/>
+            </div>
+          </div>
+        </div>
+        {recurring&&(
+          <div style={{padding:"13px 15px"}}>
+            <p style={{color:"#8E8E93",fontSize:11,fontWeight:600,margin:"0 0 3px"}}>¿Cuántos meses?</p>
+            <input style={{display:"block",width:"100%",border:"none",outline:"none",
+              fontSize:16,color:"#1C1C1E",fontFamily:"inherit",background:"transparent",
+              padding:0,WebkitAppearance:"none"}}
+              type="number" placeholder="Deja en blanco si es indefinido"
+              value={recurMonths} onChange={e=>setRM(e.target.value)}/>
+          </div>
+        )}
+      </div>
+      <div style={{display:"flex",gap:10,marginTop:4}}>
+        <Btn variant="secondary" onClick={onClose}>Cancelar</Btn>
+        <Btn onClick={()=>{
+          if(!desc||!amount||!yearMonth) return;
+          onSave({
+            id: initial?.id||Date.now(),
+            desc, amount:parseFloat(amount), cat, yearMonth,
+            recurring, recurMonths:parseInt(recurMonths)||null,
+            note, paid:initial?.paid||false,
+            paidMonths: initial?.paidMonths||{},
+          });
+        }}>Guardar</Btn>
+      </div>
+      {initial&&(
+        <div style={{marginTop:10}}>
+          <Btn variant="danger" full onClick={onDelete}>Eliminar compromiso</Btn>
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+// ─── HEALTH RING ──────────────────────────────────────────
+function HealthRing({score}){
+  const r=28, circ=2*Math.PI*r, dash=(score/100)*circ;
+  const color=score>=80?"#34C759":score>=55?"#FF9F0A":"#FF3B30";
+  const label=score>=80?"Saludable":score>=55?"Moderado":"Crítico";
+  return(
+    <div style={{textAlign:"center",flexShrink:0}}>
+      <div style={{position:"relative",width:68,height:68,margin:"0 auto"}}>
+        <svg width="68" height="68" style={{transform:"rotate(-90deg)"}}>
+          <circle cx="34" cy="34" r={r} fill="none" stroke="#E5E5EA" strokeWidth="5"/>
+          <circle cx="34" cy="34" r={r} fill="none" stroke={color} strokeWidth="5"
+            strokeDasharray={`${dash} ${circ}`} strokeLinecap="round"
+            style={{transition:"stroke-dasharray 0.8s ease"}}/>
+        </svg>
+        <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center"}}>
+          <span style={{fontSize:15,fontWeight:800,color}}>{score}</span>
+        </div>
+      </div>
+      <p style={{fontSize:10,fontWeight:700,color,margin:"4px 0 0",letterSpacing:0.3}}>{label}</p>
+    </div>
+  );
+}
+
+function CycleBadge({cycle}){
+  if(cycle==="current") return null;
+  const styles={ next:{color:"#007AFF",background:"rgba(0,122,255,0.1)"}, past:{color:"#8E8E93",background:"rgba(142,142,147,0.1)"} };
+  const labels={ next:"Sig. ciclo", past:"Anterior" };
+  return(
+    <span style={{fontSize:9,fontWeight:700,borderRadius:6,padding:"2px 6px",marginLeft:5,flexShrink:0,...styles[cycle]}}>
+      {labels[cycle]}
+    </span>
+  );
+}
+
+// ─── FUTURE DEBTS VIEW ────────────────────────────────────
+function DebtsView({ debts, onAdd, onEdit, onDelete, onTogglePaid }){
+  const [showForm, setShowForm] = useState(false);
+  const [editing, setEditing]   = useState(null);
+  const HORIZON = 6;
+
+  const months = Array.from({length: HORIZON}, (_,i) => {
+    const ym = monthKey(i);
+    return { ym, label: monthLabel(ym) };
+  });
+
+  function debtAppearsIn(debt, ym) {
+    if (!debt.recurring) return debt.yearMonth === ym;
+    const [sy,sm]=debt.yearMonth.split("-").map(Number);
+    const [ty,tm]=ym.split("-").map(Number);
+    const offset=(ty*12+tm)-(sy*12+sm);
+    if(offset<0) return false;
+    if(debt.recurMonths&&offset>=debt.recurMonths) return false;
+    return true;
+  }
+
+  function monthTotal(ym) {
+    return debts.reduce((s,d)=>{
+      if(!debtAppearsIn(d,ym)) return s;
+      const isPaid=d.paidMonths?.[ym]||(ym===d.yearMonth&&d.paid);
+      return s+(isPaid?0:d.amount);
+    },0);
+  }
+
+  const currentYM = monthKey(0);
+  const debtAlert = debts.filter(d=>{
+    if(!debtAppearsIn(d,currentYM)) return false;
+    return !(d.paidMonths?.[currentYM]||(currentYM===d.yearMonth&&d.paid));
+  }).length;
+
+  return(
+    <div style={{minHeight:"100vh",background:"#F2F2F7",fontFamily:"'SF Pro Text',-apple-system,sans-serif",paddingBottom:120}}>
+      <div style={{background:"#fff",padding:"52px 20px 18px",borderBottom:"1px solid #E5E5EA"}}>
+        <p style={{color:"#8E8E93",fontSize:11,fontWeight:700,letterSpacing:0.8,textTransform:"uppercase",margin:"0 0 3px"}}>
+          Finanzas personales
+        </p>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+          <h1 style={{color:"#1C1C1E",fontSize:28,fontWeight:800,margin:0}}>Compromisos</h1>
+          <Btn small variant="teal" onClick={()=>{ setEditing(null); setShowForm(true); }}>+ Nuevo</Btn>
+        </div>
+        {debts.length > 0 && (
+          <div style={{display:"flex",gap:8,marginTop:16}}>
+            {[
+              {l:"ESTE MES",       v:MX(monthTotal(currentYM)),                                c:"#FF3B30"},
+              {l:"PENDIENTES",     v:`${debtAlert} pago${debtAlert!==1?"s":""}`,               c:"#FF9F0A"},
+              {l:"PRÓX. 6 MESES",  v:MX(months.reduce((s,{ym})=>s+monthTotal(ym),0)),          c:"#007AFF"},
+            ].map(s=>(
+              <div key={s.l} style={{flex:1,background:"#F2F2F7",borderRadius:13,padding:"10px 11px"}}>
+                <p style={{color:"#8E8E93",fontSize:9,fontWeight:700,letterSpacing:0.5,textTransform:"uppercase",margin:"0 0 3px"}}>{s.l}</p>
+                <p style={{color:s.c,fontSize:13,fontWeight:800,margin:0}}>{s.v}</p>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div style={{padding:"16px"}}>
+        {debts.length===0?(
+          <div style={{textAlign:"center",padding:"80px 24px 0",color:"#C7C7CC"}}>
+            <p style={{fontSize:52,margin:"0 0 12px"}}>📅</p>
+            <p style={{fontSize:19,fontWeight:700,color:"#3A3A3C",margin:"0 0 8px"}}>Sin compromisos</p>
+            <p style={{fontSize:14,color:"#8E8E93",lineHeight:1.6,margin:0}}>
+              Registra préstamos, rentas y pagos<br/>futuros para no agarrarte desprevenido
+            </p>
+          </div>
+        ):months.map(({ym,label})=>{
+          const items=debts.filter(d=>debtAppearsIn(d,ym));
+          if(!items.length) return null;
+          const total=monthTotal(ym);
+          const isCurrentMonth=ym===currentYM;
+          return(
+            <div key={ym} style={{marginBottom:20}}>
+              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",margin:"0 4px 8px"}}>
+                <div style={{display:"flex",alignItems:"center",gap:8}}>
+                  <p style={{color:isCurrentMonth?"#1C1C1E":"#8E8E93",fontSize:13,fontWeight:700,
+                    letterSpacing:0.4,textTransform:"uppercase",margin:0}}>
+                    {label}
+                  </p>
+                  {isCurrentMonth&&(
+                    <span style={{fontSize:10,fontWeight:700,color:"#007AFF",
+                      background:"rgba(0,122,255,0.1)",borderRadius:6,padding:"2px 7px"}}>HOY</span>
+                  )}
+                </div>
+                <p style={{color:total===0?"#34C759":"#FF3B30",fontSize:14,fontWeight:800,margin:0}}>
+                  {total===0?"✓ Al día":MX(total)}
+                </p>
+              </div>
+              <div style={S.card}>
+                {items.map((debt,i)=>{
+                  const isPaidThisMonth=debt.paidMonths?.[ym]||(ym===debt.yearMonth&&debt.paid);
+                  return(
+                    <div key={`${debt.id}-${ym}`}
+                      style={{...S.row,borderBottom:i<items.length-1?"1px solid #F2F2F7":"none",
+                        opacity:isPaidThisMonth?0.5:1,transition:"opacity 0.2s"}}>
+                      <div onClick={()=>onTogglePaid(debt.id,ym)}
+                        style={{width:26,height:26,borderRadius:13,flexShrink:0,
+                          border:isPaidThisMonth?"none":"2px solid #D1D1D6",
+                          background:isPaidThisMonth?"#34C759":"transparent",
+                          cursor:"pointer",display:"flex",alignItems:"center",
+                          justifyContent:"center",marginRight:14,transition:"all 0.2s"}}>
+                        {isPaidThisMonth&&<span style={{color:"#fff",fontSize:14,fontWeight:800}}>✓</span>}
+                      </div>
+                      <div style={{flex:1,minWidth:0}}>
+                        <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+                          <p style={{color:"#1C1C1E",fontSize:14,fontWeight:600,margin:0,
+                            textDecoration:isPaidThisMonth?"line-through":"none",
+                            whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
+                            {debt.desc}
+                          </p>
+                          {debt.recurring&&(
+                            <span style={{fontSize:9,fontWeight:700,color:"#007AFF",
+                              background:"rgba(0,122,255,0.1)",borderRadius:4,padding:"1px 5px",flexShrink:0}}>
+                              {debt.recurMonths
+                                ?(()=>{
+                                    const [sy,sm]=debt.yearMonth.split("-").map(Number);
+                                    const [ty,tm]=ym.split("-").map(Number);
+                                    return `${(ty*12+tm)-(sy*12+sm)+1}/${debt.recurMonths}`;
+                                  })()
+                                :"∞ mensual"}
+                            </span>
+                          )}
+                        </div>
+                        <p style={{color:"#8E8E93",fontSize:11,margin:"2px 0 0"}}>
+                          {debt.cat}{debt.note?` · ${debt.note}`:""}
+                        </p>
+                      </div>
+                      <p style={{color:isPaidThisMonth?"#8E8E93":"#1C1C1E",fontSize:15,fontWeight:700,
+                        margin:"0 8px",flexShrink:0,textDecoration:isPaidThisMonth?"line-through":"none"}}>
+                        {MX(debt.amount)}
+                      </p>
+                      {(ym===debt.yearMonth||debt.recurring)&&(
+                        <button onClick={()=>{setEditing(debt);setShowForm(true);}}
+                          style={{background:"none",border:"none",color:"#8E8E93",
+                            cursor:"pointer",fontSize:16,padding:"0 0 0 4px",lineHeight:1,flexShrink:0}}>
+                          ✎
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {showForm&&(
+        <DebtForm initial={editing}
+          onSave={data=>{onAdd(data);setShowForm(false);setEditing(null);}}
+          onClose={()=>{setShowForm(false);setEditing(null);}}
+          onDelete={()=>{if(editing)onDelete(editing.id);setShowForm(false);setEditing(null);}}/>
+      )}
+    </div>
+  );
+}
+
+// ─── CARD DETAIL ──────────────────────────────────────────
+function CardDetail({card, onBack, onUpdate, onDelete}){
+  const theme      = CARD_THEMES[card.themeIdx??0];
+  const cutDay     = card.cutDay  || 1;
+  const payDay     = card.payDay  || cutDay;
+
+  const [showExpForm,  setShowExpForm]  = useState(false);
+  const [showDefForm,  setShowDefForm]  = useState(false);
+  const [showEditForm, setShowEditForm] = useState(false);
+  const [tab,   setTab]   = useState("gastos");
+  const [search,setSearch]= useState("");
+
+  const expenses = card.expenses||[];
+  const deferred = card.deferred||[];
+
+  const currentCycleExpenses = expenses.filter(e=>
+    !e.paid && getCycleLabel(e.date,cutDay)==="current" && !e.alreadyInBalance
+  );
+  const totalNewExpenses = currentCycleExpenses.reduce((s,e)=>s+e.amount,0);
+  const msiExtra   = deferred.filter(d=>!d.paid&&!d.alreadyInBalance).reduce((s,d)=>s+d.monthlyAmt,0);
+  const realAvailable = (card.available||0) - totalNewExpenses - msiExtra;
+  const totalLimit    = card.limit+(card.limitExt||0);
+  const pct = Math.min(100,Math.max(0,((totalLimit-realAvailable)/totalLimit)*100));
+
+  const toPay = expenses.filter(e=>!e.paid&&getCycleLabel(e.date,cutDay)==="current")
+    .reduce((s,e)=>s+e.amount,0)
+    + deferred.filter(d=>!d.paid).reduce((s,d)=>s+d.monthlyAmt,0);
+
+  const msiThisCut    = deferred.filter(d=>!d.paid).reduce((s,d)=>s+d.monthlyAmt,0);
+  const daysToPayment = daysUntilPay(payDay);
+  const daysToCut     = daysUntilCut(cutDay);
+  const barColor = pct>85?"#FF3B30":pct>65?"#FF9F0A":theme.bar;
+  const alertMSI = deferred.filter(d=>!d.paid&&d.currentInstall===d.totalInstall);
+
+  const filtered = search.trim()
+    ? expenses.filter(e=>e.desc.toLowerCase().includes(search.toLowerCase())||e.cat?.toLowerCase().includes(search.toLowerCase()))
+    : expenses;
+  const grouped    = filtered.reduce((acc,e)=>{ if(!acc[e.date])acc[e.date]=[]; acc[e.date].push(e); return acc; },{});
+  const sortedDates= Object.keys(grouped).sort((a,b)=>b.localeCompare(a));
+  const nextCycleTotal = expenses.filter(e=>!e.paid&&getCycleLabel(e.date,cutDay)==="next").reduce((s,e)=>s+e.amount,0);
+
+  const catTotals = CATEGORIES.map(cat=>({
+    cat, total:expenses.filter(e=>e.cat===cat&&!e.paid&&getCycleLabel(e.date,cutDay)==="current").reduce((s,e)=>s+e.amount,0)
+  })).filter(c=>c.total>0).sort((a,b)=>b.total-a.total);
+
+  const toggleExp = id => {
+    const exp = expenses.find(e => e.id === id);
+    if (!exp) return;
+    const wasPaid = exp.paid;
+    const delta = wasPaid ? -exp.amount : exp.amount;
+    onUpdate({
+      ...card,
+      available: (card.available || 0) + delta,
+      expenses: expenses.map(e => e.id === id ? {...e, paid: !e.paid} : e),
+    });
+  };
+
+  const deleteExp = id => onUpdate({...card, expenses:expenses.filter(e=>e.id!==id)});
+
+  // ── FIX MSI: siempre actualiza available al palomear ──
+  // Si alreadyInBalance=true → el banco ya lo descontó del disponible,
+  // al marcar pagado el banco lo libera → available sube.
+  // Si alreadyInBalance=false → nosotros lo teníamos descontado internamente,
+  // al marcar pagado lo liberamos también.
+  // En ambos casos la cuota se libera del disponible al pagar.
+  const toggleDef = id => {
+    const def = deferred.find(d => d.id === id);
+    if (!def) return;
+    // Al pagar (paid=false → true): available sube (la cuota quedó pagada, libera crédito)
+    // Al despagar (paid=true → false): available baja
+    const delta = def.paid ? -def.monthlyAmt : def.monthlyAmt;
+    onUpdate({
+      ...card,
+      available: (card.available || 0) + delta,
+      deferred: deferred.map(d => d.id === id ? {...d, paid: !d.paid} : d),
+    });
+  };
+
+  const deleteDef = id => onUpdate({...card, deferred:deferred.filter(d=>d.id!==id)});
+
+  const resetMonth = () => {
+    if(!window.confirm("¿Iniciar nuevo ciclo? Se eliminarán los gastos pagados y se avanzarán los diferidos.")) return;
+    onUpdate({
+      ...card,
+      expenses: expenses.filter(e=>!e.paid||getCycleLabel(e.date,cutDay)==="next"),
+      deferred: deferred.map(d=>({...d,paid:false,currentInstall:Math.min(d.currentInstall+1,d.totalInstall)}))
+    });
+  };
+
+  return(
+    <div style={{minHeight:"100vh",background:"#F2F2F7",fontFamily:"'SF Pro Text',-apple-system,sans-serif"}}>
+
+      {/* ── HEADER card style ── */}
+      <div style={{background:themeBg(theme),padding:"52px 20px 24px",position:"relative",overflow:"hidden"}}>
+        {/* Decorative circles */}
+        <div style={{position:"absolute",right:-60,top:-60,width:220,height:220,
+          borderRadius:"50%",background:"rgba(255,255,255,0.05)",pointerEvents:"none"}}/>
+        <div style={{position:"absolute",left:-40,bottom:-40,width:160,height:160,
+          borderRadius:"50%",background:"rgba(255,255,255,0.04)",pointerEvents:"none"}}/>
+
+        <button onClick={onBack} style={{background:"none",border:"none",color:theme.bar,
+          fontSize:15,fontWeight:700,cursor:"pointer",padding:0,marginBottom:20,
+          display:"flex",alignItems:"center",gap:4,position:"relative",zIndex:1}}>
+          ‹ Mis tarjetas
+        </button>
+
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",position:"relative",zIndex:1}}>
+          <div>
+            <p style={{color:"rgba(255,255,255,0.45)",fontSize:10,fontWeight:700,
+              letterSpacing:1,textTransform:"uppercase",margin:"0 0 4px"}}>Tarjeta de crédito</p>
+            <h2 style={{color:"#fff",fontSize:28,fontWeight:800,margin:0,letterSpacing:-0.5}}>{card.name}</h2>
+          </div>
+          <button onClick={()=>setShowEditForm(true)}
+            style={{background:"rgba(255,255,255,0.18)",border:"none",color:"#fff",
+              borderRadius:12,padding:"9px 16px",cursor:"pointer",fontSize:13,fontWeight:600,flexShrink:0,
+              backdropFilter:"blur(4px)"}}>
+            Editar
+          </button>
+        </div>
+
+        {/* Available big number */}
+        <div style={{marginTop:20,position:"relative",zIndex:1}}>
+          <p style={{color:"rgba(255,255,255,0.5)",fontSize:12,margin:"0 0 2px"}}>Disponible real</p>
+          <p style={{color:realAvailable<0?"#FF453A":theme.bar,fontSize:36,fontWeight:800,
+            margin:0,letterSpacing:-1}}>{MX(realAvailable)}</p>
+        </div>
+
+        {/* Usage bar */}
+        <div style={{background:"rgba(255,255,255,0.15)",borderRadius:99,height:5,marginTop:14,position:"relative",zIndex:1}}>
+          <div style={{width:`${pct}%`,height:"100%",borderRadius:99,background:barColor,transition:"width 0.6s ease"}}/>
+        </div>
+        <div style={{display:"flex",justifyContent:"space-between",marginTop:5,position:"relative",zIndex:1}}>
+          <p style={{color:"rgba(255,255,255,0.35)",fontSize:11,margin:0}}>{pct.toFixed(0)}% utilizado</p>
+          <p style={{color:"rgba(255,255,255,0.35)",fontSize:11,margin:0}}>{MX(card.limit+(card.limitExt||0))}</p>
+        </div>
+
+        {/* Stats pills */}
+        <div style={{display:"flex",gap:8,marginTop:14,position:"relative",zIndex:1}}>
+          {[
+            {l:"ESTE CICLO",v:MX(totalNewExpenses),c:"rgba(255,255,255,0.9)"},
+            {l:"A PAGAR",   v:MX(toPay),           c:"rgba(255,255,255,0.9)"},
+            {l:"MSI",       v:MX(msiThisCut),       c:theme.bar},
+          ].map(s=>(
+            <div key={s.l} style={{flex:1,background:"rgba(255,255,255,0.1)",borderRadius:13,padding:"10px 11px",backdropFilter:"blur(4px)"}}>
+              <p style={{color:"rgba(255,255,255,0.45)",fontSize:9,fontWeight:700,
+                letterSpacing:0.4,margin:"0 0 3px",textTransform:"uppercase"}}>{s.l}</p>
+              <p style={{color:s.c,fontSize:13,fontWeight:800,margin:0}}>{s.v}</p>
+            </div>
+          ))}
+        </div>
+
+        {/* Cut / Pay dates */}
+        <div style={{display:"flex",gap:8,marginTop:8,position:"relative",zIndex:1}}>
+          {[
+            {l:"✂️ Corte", day:cutDay, days:daysToCut,  urgent:daysToCut<=3},
+            {l:"💳 Pago",  day:payDay, days:daysToPayment, urgent:daysToPayment<=5},
+          ].map(f=>(
+            <div key={f.l} style={{flex:1,background:"rgba(255,255,255,0.08)",borderRadius:13,padding:"10px 12px"}}>
+              <p style={{color:"rgba(255,255,255,0.4)",fontSize:9,fontWeight:700,
+                letterSpacing:0.5,textTransform:"uppercase",margin:"0 0 2px"}}>{f.l}</p>
+              <p style={{color:"rgba(255,255,255,0.9)",fontSize:13,fontWeight:700,margin:0}}>
+                Día {f.day}
+                <span style={{color:f.urgent?"#FF453A":theme.bar,fontSize:11,marginLeft:6}}>
+                  {f.days===0?"¡Hoy!":`en ${f.days}d`}
+                </span>
+              </p>
+            </div>
+          ))}
+        </div>
+
+        {nextCycleTotal>0&&(
+          <div style={{marginTop:10,background:"rgba(0,122,255,0.2)",
+            border:"1px solid rgba(0,122,255,0.3)",borderRadius:12,padding:"9px 13px",
+            display:"flex",justifyContent:"space-between",alignItems:"center",
+            position:"relative",zIndex:1}}>
+            <span style={{color:"rgba(255,255,255,0.7)",fontSize:12}}>⚡ Sig. ciclo</span>
+            <span style={{color:"#4FC3F7",fontSize:13,fontWeight:700}}>{MX(nextCycleTotal)}</span>
+          </div>
+        )}
+
+        {alertMSI.length>0&&(
+          <div style={{marginTop:8,background:"rgba(255,59,48,0.2)",
+            border:"1px solid rgba(255,59,48,0.3)",borderRadius:12,padding:"10px 13px",
+            position:"relative",zIndex:1}}>
+            <p style={{color:"#FF453A",fontSize:12,fontWeight:700,margin:"0 0 4px"}}>⚠️ Última cuota MSI</p>
+            {alertMSI.map(d=>(
+              <p key={d.id} style={{color:"rgba(255,255,255,0.7)",fontSize:12,margin:"2px 0 0"}}>
+                {d.desc?`${d.desc} — `:""}{MX(d.monthlyAmt)} · {d.currentInstall}/{d.totalInstall}
+              </p>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* ── TABS ── */}
+      <div style={{display:"flex",background:"#fff",borderBottom:"1px solid #E5E5EA",
+        position:"sticky",top:0,zIndex:50}}>
+        {[["gastos","Gastos"],["diferidos","MSI"],["categorias","Categorías"]].map(([k,l])=>(
+          <button key={k} onClick={()=>setTab(k)}
+            style={{flex:1,padding:"14px 0",background:"none",border:"none",
+              color:tab===k?"#007AFF":"#8E8E93",fontSize:13,fontWeight:tab===k?700:500,
+              cursor:"pointer",borderBottom:tab===k?"2.5px solid #007AFF":"2.5px solid transparent",
+              transition:"all 0.15s"}}>
+            {l}
+          </button>
+        ))}
+      </div>
+
+      {/* ── CONTENT ── */}
+      <div style={{padding:"16px 16px 120px",minHeight:400}}>
+
+        {/* GASTOS */}
+        {tab==="gastos"&&(
+          <>
+            <div style={{display:"flex",gap:10,alignItems:"center",marginBottom:12}}>
+              <input style={{...S.inp,flex:1,fontSize:14,padding:"11px 14px"}}
+                placeholder="🔍  Buscar..." value={search} onChange={e=>setSearch(e.target.value)}/>
+              <Btn small onClick={()=>setShowExpForm(true)}>+ Gasto</Btn>
+            </div>
+            <div style={{display:"flex",gap:8,marginBottom:16}}>
+              <div style={{flex:1,background:"#fff",borderRadius:14,padding:"12px 14px",boxShadow:"0 1px 3px rgba(0,0,0,0.06)"}}>
+                <p style={{color:"#8E8E93",fontSize:10,fontWeight:700,letterSpacing:0.5,textTransform:"uppercase",margin:"0 0 3px"}}>Este ciclo</p>
+                <p style={{color:"#1C1C1E",fontSize:16,fontWeight:800,margin:0}}>{MX(totalNewExpenses)}</p>
+              </div>
+              <div style={{flex:1,background:"#fff",borderRadius:14,padding:"12px 14px",boxShadow:"0 1px 3px rgba(0,0,0,0.06)"}}>
+                <p style={{color:"#8E8E93",fontSize:10,fontWeight:700,letterSpacing:0.5,textTransform:"uppercase",margin:"0 0 3px"}}>Pagados</p>
+                <p style={{color:"#34C759",fontSize:16,fontWeight:800,margin:0}}>
+                  {MX(expenses.filter(e=>e.paid).reduce((s,e)=>s+e.amount,0))}
+                </p>
+              </div>
+            </div>
+
+            {sortedDates.length===0?(
+              <div style={{textAlign:"center",padding:"60px 0",color:"#C7C7CC"}}>
+                <p style={{fontSize:44,margin:"0 0 8px"}}>🧾</p>
+                <p style={{fontSize:15,color:"#8E8E93"}}>{search?"Sin resultados":"Sin gastos registrados"}</p>
+              </div>
+            ):sortedDates.map(date=>{
+              const cycle=getCycleLabel(date,cutDay);
+              return(
+                <div key={date}>
+                  <div style={{display:"flex",alignItems:"center",margin:"18px 4px 8px",gap:6}}>
+                    <p style={{color:"#8E8E93",fontSize:11,fontWeight:700,letterSpacing:0.7,textTransform:"uppercase",margin:0}}>
+                      {fmtDate(date)}
+                    </p>
+                    <CycleBadge cycle={cycle}/>
+                  </div>
+                  <div style={S.card}>
+                    {grouped[date].map((exp,i)=>(
+                      <div key={exp.id} style={{...S.row,
+                        borderBottom:i<grouped[date].length-1?"1px solid #F2F2F7":"none",
+                        opacity:exp.paid?0.45:1,transition:"opacity 0.2s"}}>
+                        <div onClick={()=>toggleExp(exp.id)}
+                          style={{width:26,height:26,borderRadius:13,flexShrink:0,
+                            border:exp.paid?"none":"2px solid #D1D1D6",
+                            background:exp.paid?"#34C759":"transparent",
+                            cursor:"pointer",display:"flex",alignItems:"center",
+                            justifyContent:"center",marginRight:14,transition:"all 0.2s"}}>
+                          {exp.paid&&<span style={{color:"#fff",fontSize:14,fontWeight:800}}>✓</span>}
+                        </div>
+                        <div style={{flex:1,minWidth:0}}>
+                          <div style={{display:"flex",alignItems:"center",gap:5}}>
+                            <p style={{color:"#1C1C1E",fontSize:15,fontWeight:600,margin:0,
+                              textDecoration:exp.paid?"line-through":"none",
+                              whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
+                              {exp.desc}
+                            </p>
+                            {exp.alreadyInBalance&&(
+                              <span style={{fontSize:9,fontWeight:700,color:"#34C759",
+                                background:"rgba(52,199,89,0.12)",borderRadius:4,padding:"1px 5px",flexShrink:0}}>
+                                En saldo
+                              </span>
+                            )}
+                          </div>
+                          <p style={{color:"#8E8E93",fontSize:12,margin:"2px 0 0"}}>
+                            {exp.cat}{exp.note?` · ${exp.note}`:""}
+                          </p>
+                        </div>
+                        <p style={{color:exp.paid?"#8E8E93":"#1C1C1E",fontSize:15,fontWeight:700,
+                          margin:"0 12px 0 8px",flexShrink:0,textDecoration:exp.paid?"line-through":"none"}}>
+                          {MX(exp.amount)}
+                        </p>
+                        <button onClick={()=>deleteExp(exp.id)}
+                          style={{background:"rgba(255,59,48,0.1)",border:"none",color:"#FF3B30",
+                            cursor:"pointer",fontSize:16,padding:"5px 8px",lineHeight:1,
+                            flexShrink:0,borderRadius:8,fontWeight:700}}>×</button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+
+            {expenses.length>0&&(
+              <div style={{marginTop:28,textAlign:"center"}}>
+                <button onClick={resetMonth}
+                  style={{background:"#fff",border:"none",color:"#8E8E93",
+                    borderRadius:14,padding:"12px 24px",fontSize:14,fontWeight:600,
+                    cursor:"pointer",fontFamily:"inherit",
+                    boxShadow:"0 1px 3px rgba(0,0,0,0.06)"}}>
+                  🔄 Iniciar nuevo ciclo
+                </button>
+              </div>
+            )}
+          </>
+        )}
+
+        {/* DIFERIDOS / MSI */}
+        {tab==="diferidos"&&(
+          <>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+              <div>
+                <p style={{color:"#1C1C1E",fontSize:15,fontWeight:700,margin:0}}>
+                  Total: <span style={{color:"#AF52DE"}}>{MX(msiThisCut)}</span>
+                </p>
+                <p style={{color:"#8E8E93",fontSize:12,margin:"2px 0 0"}}>
+                  {msiExtra>0?`${MX(msiExtra)} no en saldo`:"Todo reflejado en saldo"}
+                </p>
+              </div>
+              <Btn small variant="purple" onClick={()=>setShowDefForm(true)}>+ MSI</Btn>
+            </div>
+            {deferred.length===0?(
+              <div style={{textAlign:"center",padding:"60px 0",color:"#C7C7CC"}}>
+                <p style={{fontSize:44,margin:"0 0 8px"}}>🔁</p>
+                <p style={{fontSize:15,color:"#8E8E93"}}>Sin diferidos registrados</p>
+              </div>
+            ):(
+              <div style={S.card}>
+                {deferred.map((d,i)=>(
+                  <div key={d.id} style={{...S.row,
+                    borderBottom:i<deferred.length-1?"1px solid #F2F2F7":"none",
+                    opacity:d.paid?0.45:1,transition:"opacity 0.2s"}}>
+                    <div onClick={()=>toggleDef(d.id)}
+                      style={{width:26,height:26,borderRadius:13,flexShrink:0,
+                        border:d.paid?"none":"2px solid #D1D1D6",
+                        background:d.paid?"#34C759":"transparent",
+                        cursor:"pointer",display:"flex",alignItems:"center",
+                        justifyContent:"center",marginRight:14,transition:"all 0.2s"}}>
+                      {d.paid&&<span style={{color:"#fff",fontSize:14,fontWeight:800}}>✓</span>}
+                    </div>
+                    <div style={{flex:1,minWidth:0}}>
+                      {d.desc&&<p style={{color:"#8E8E93",fontSize:11,margin:"0 0 1px",
+                        textDecoration:d.paid?"line-through":"none",fontWeight:500}}>{d.desc}</p>}
+                      <p style={{color:"#1C1C1E",fontSize:16,fontWeight:700,margin:0,
+                        textDecoration:d.paid?"line-through":"none"}}>
+                        {MX(d.monthlyAmt)}
+                      </p>
+                      <div style={{display:"flex",gap:5,marginTop:4,flexWrap:"wrap",alignItems:"center"}}>
+                        <span style={{fontSize:11,color:"#8E8E93",fontWeight:500}}>
+                          Cuota {d.currentInstall}/{d.totalInstall}{d.dueMonth?` · vence ${d.dueMonth}`:""}
+                        </span>
+                        <span style={{fontSize:10,fontWeight:700,
+                          color:d.alreadyInBalance?"#34C759":"#FF9F0A",
+                          background:d.alreadyInBalance?"rgba(52,199,89,0.12)":"rgba(255,159,10,0.12)",
+                          borderRadius:5,padding:"1px 6px"}}>
+                          {d.alreadyInBalance?"En saldo":"Extra"}
+                        </span>
+                        {d.currentInstall===d.totalInstall&&!d.paid&&(
+                          <span style={{fontSize:10,fontWeight:700,color:"#FF3B30",
+                            background:"rgba(255,59,48,0.1)",borderRadius:5,padding:"1px 6px"}}>
+                            ÚLTIMA
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <button onClick={()=>deleteDef(d.id)}
+                      style={{background:"rgba(255,59,48,0.1)",border:"none",color:"#FF3B30",
+                        cursor:"pointer",fontSize:16,padding:"5px 8px",lineHeight:1,
+                        flexShrink:0,borderRadius:8,fontWeight:700}}>×</button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
+        )}
+
+        {/* CATEGORÍAS */}
+        {tab==="categorias"&&(
+          <>
+            <p style={{color:"#8E8E93",fontSize:13,margin:"0 0 14px"}}>Ciclo actual por categoría</p>
+            {catTotals.length===0?(
+              <div style={{textAlign:"center",padding:"60px 0"}}>
+                <p style={{fontSize:44,margin:"0 0 8px"}}>📊</p>
+                <p style={{fontSize:15,color:"#8E8E93"}}>Sin datos aún</p>
+              </div>
+            ):catTotals.map(({cat,total})=>{
+              const p=(total/Math.max(totalNewExpenses,1))*100;
+              return(
+                <div key={cat} style={{...S.card,marginBottom:8,padding:"14px 16px"}}>
+                  <div style={{display:"flex",justifyContent:"space-between",marginBottom:8}}>
+                    <span style={{color:"#1C1C1E",fontSize:14,fontWeight:600}}>{cat}</span>
+                    <span style={{color:"#007AFF",fontSize:14,fontWeight:700}}>{MX(total)}</span>
+                  </div>
+                  <div style={{background:"#F2F2F7",borderRadius:99,height:6}}>
+                    <div style={{width:`${p}%`,height:"100%",borderRadius:99,
+                      background:"#007AFF",transition:"width 0.5s ease"}}/>
+                  </div>
+                  <p style={{color:"#C7C7CC",fontSize:11,margin:"5px 0 0",textAlign:"right"}}>{p.toFixed(0)}%</p>
+                </div>
+              );
+            })}
+          </>
+        )}
+      </div>
+
+      {showExpForm&&<ExpenseForm cutDay={cutDay}
+        onSave={exp=>{ onUpdate({...card,expenses:[...(card.expenses||[]),exp]}); setShowExpForm(false); }}
+        onClose={()=>setShowExpForm(false)}/>}
+
+      {showDefForm&&<DeferredForm
+        onSave={d=>{ onUpdate({...card,deferred:[...(card.deferred||[]),d]}); setShowDefForm(false); }}
+        onClose={()=>setShowDefForm(false)}/>}
+
+      {showEditForm&&(
+        <CardForm initial={card}
+          onSave={data=>{ onUpdate({...card,...data}); setShowEditForm(false); }}
+          onClose={()=>setShowEditForm(false)}
+          onDelete={()=>{ onDelete(card.id); }}/>
+      )}
+    </div>
+  );
+}
+
+// ─── BOTTOM NAV ───────────────────────────────────────────
+function BottomNav({ active, onChange, debtAlert }){
+  const tabs = [
+    { id:"cards", icon:"💳", label:"Tarjetas" },
+    { id:"debts", icon:"📅", label:"Compromisos", alert: debtAlert },
+  ];
+  return(
+    <div style={{position:"fixed",bottom:0,left:0,right:0,zIndex:200,
+      background:"rgba(255,255,255,0.94)",backdropFilter:"blur(20px)",
+      WebkitBackdropFilter:"blur(20px)",borderTop:"0.5px solid rgba(0,0,0,0.1)",
+      display:"flex",justifyContent:"space-around",
+      paddingBottom:"env(safe-area-inset-bottom,14px)"}}>
+      {tabs.map(t=>(
+        <button key={t.id} onClick={()=>onChange(t.id)}
+          style={{flex:1,padding:"11px 0 8px",background:"none",border:"none",
+            cursor:"pointer",display:"flex",flexDirection:"column",
+            alignItems:"center",gap:3,position:"relative"}}>
+          <span style={{fontSize:24,lineHeight:1,filter:active===t.id?"none":"grayscale(1) opacity(0.4)"}}>{t.icon}</span>
+          <span style={{fontSize:10,fontWeight:700,color:active===t.id?"#007AFF":"#8E8E93",letterSpacing:0.2}}>
+            {t.label}
+          </span>
+          {t.alert>0&&(
+            <span style={{position:"absolute",top:7,right:"calc(50% - 20px)",
+              background:"#FF3B30",color:"#fff",fontSize:10,fontWeight:800,
+              borderRadius:99,minWidth:17,height:17,display:"flex",
+              alignItems:"center",justifyContent:"center",padding:"0 4px"}}>
+              {t.alert}
+            </span>
+          )}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// ─── HOME / DASHBOARD ─────────────────────────────────────
+function App(){
+  const [cards, setCards] = useLS("fn3_cards",[]);
+  const [debts, setDebts] = useLS("fn3_debts",[]);
+  const [selected,   setSelected]   = useState(null);
+  const [showNewCard,setShowNewCard] = useState(false);
+  const [screen,     setScreen]     = useState("cards");
+
+  const updateCard = updated=>{ setCards(prev=>prev.map(c=>c.id===updated.id?updated:c)); setSelected(updated); };
+  const deleteCard = id=>{ setCards(prev=>prev.filter(c=>c.id!==id)); setSelected(null); };
+  const addCard    = data=>{ setCards(prev=>[...prev,{id:Date.now(),expenses:[],deferred:[],...data}]); setShowNewCard(false); };
+
+  const saveDebt   = data=>setDebts(prev=>{ const e=prev.find(d=>d.id===data.id); return e?prev.map(d=>d.id===data.id?data:d):[...prev,data]; });
+  const deleteDebt = id=>setDebts(prev=>prev.filter(d=>d.id!==id));
+  const toggleDebtPaid = (debtId,ym)=>setDebts(prev=>prev.map(d=>{
+    if(d.id!==debtId) return d;
+    if(!d.recurring&&d.yearMonth===ym) return {...d,paid:!d.paid};
+    const pm={...(d.paidMonths||{})}; pm[ym]=!pm[ym]; return {...d,paidMonths:pm};
+  }));
+
+  function debtAppearsIn(debt,ym){
+    if(!debt.recurring) return debt.yearMonth===ym;
+    const [sy,sm]=debt.yearMonth.split("-").map(Number);
+    const [ty,tm]=ym.split("-").map(Number);
+    const off=(ty*12+tm)-(sy*12+sm);
+    if(off<0) return false;
+    if(debt.recurMonths&&off>=debt.recurMonths) return false;
+    return true;
+  }
+  const currentYM  = monthKey(0);
+  const debtAlert  = debts.filter(d=>{
+    if(!debtAppearsIn(d,currentYM)) return false;
+    return !(d.paidMonths?.[currentYM]||(currentYM===d.yearMonth&&d.paid));
+  }).length;
+
+  if(selected){
+    const live=cards.find(c=>c.id===selected.id)||selected;
+    return <CardDetail card={live} onBack={()=>setSelected(null)} onUpdate={updateCard} onDelete={deleteCard}/>;
+  }
+
+  if(screen==="debts"){
+    return(
+      <>
+        <DebtsView debts={debts} onAdd={saveDebt} onDelete={deleteDebt} onTogglePaid={toggleDebtPaid}/>
+        <BottomNav active="debts" onChange={s=>setScreen(s)} debtAlert={debtAlert}/>
+      </>
+    );
+  }
+
+  const totalLimit      = cards.reduce((s,c)=>s+c.limit+(c.limitExt||0),0);
+  const totalAvail      = cards.reduce((s,c)=>{
+    const g=(c.expenses||[]).filter(e=>!e.paid&&getCycleLabel(e.date,c.cutDay)==="current"&&!e.alreadyInBalance).reduce((a,e)=>a+e.amount,0);
+    const m=(c.deferred||[]).filter(d=>!d.paid&&!d.alreadyInBalance).reduce((a,d)=>a+d.monthlyAmt,0);
+    return s+(c.available||0)-g-m;
+  },0);
+  const totalDebt       = totalLimit-totalAvail;
+  const totalPayThisCut = cards.reduce((s,c)=>{
+    const g=(c.expenses||[]).filter(e=>!e.paid&&getCycleLabel(e.date,c.cutDay)==="current").reduce((a,e)=>a+e.amount,0);
+    const m=(c.deferred||[]).filter(d=>!d.paid).reduce((a,d)=>a+d.monthlyAmt,0);
+    return s+g+m;
+  },0);
+  const score      = healthScore(cards);
+  const allAlerts  = cards.flatMap(c=>(c.deferred||[]).filter(d=>!d.paid&&d.currentInstall===d.totalInstall).map(d=>({...d,cardName:c.name})));
+  const soonCards  = cards.filter(c=>daysUntilPay(c.payDay||c.cutDay)<=5);
+
+  const debtsDueNow   = debts.filter(d=>debtAppearsIn(d,currentYM));
+  const debtsDueTotal = debtsDueNow.reduce((s,d)=>{ const p=d.paidMonths?.[currentYM]||(currentYM===d.yearMonth&&d.paid); return s+(p?0:d.amount); },0);
+
+  return(
+    <div style={{minHeight:"100vh",background:"#F2F2F7",
+      fontFamily:"'SF Pro Text',-apple-system,BlinkMacSystemFont,sans-serif"}}>
+
+      {/* HEADER */}
+      <div style={{background:"#fff",padding:"56px 20px 16px",borderBottom:"0.5px solid #E5E5EA"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:cards.length?18:0}}>
+          <div>
+            <p style={{color:"#8E8E93",fontSize:11,fontWeight:700,letterSpacing:0.8,textTransform:"uppercase",margin:"0 0 3px"}}>
+              Finanzas personales
+            </p>
+            <h1 style={{color:"#1C1C1E",fontSize:32,fontWeight:800,margin:0,letterSpacing:-0.5}}>Mis Tarjetas</h1>
+          </div>
+          {cards.length>0&&<HealthRing score={score}/>}
+        </div>
+
+        {cards.length>0&&(
+          <div style={{display:"flex",gap:8}}>
+            {[
+              {l:"DEUDA TOTAL",   v:MX(totalDebt),       c:"#FF3B30"},
+              {l:"DISPONIBLE",    v:MX(totalAvail),      c:"#34C759"},
+              {l:"PAGAR ESTE MES",v:MX(totalPayThisCut), c:"#FF9F0A"},
+            ].map(s=>(
+              <div key={s.l} style={{flex:1,background:"#F2F2F7",borderRadius:14,padding:"11px 12px"}}>
+                <p style={{color:"#8E8E93",fontSize:9,fontWeight:700,letterSpacing:0.5,textTransform:"uppercase",margin:"0 0 3px"}}>{s.l}</p>
+                <p style={{color:s.c,fontSize:14,fontWeight:800,margin:0}}>{s.v}</p>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {debtsDueTotal>0&&(
+          <div onClick={()=>setScreen("debts")}
+            style={{marginTop:12,background:"rgba(50,173,230,0.08)",
+              border:"1px solid rgba(50,173,230,0.18)",borderRadius:14,padding:"11px 14px",
+              cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <div>
+              <p style={{color:"#32ADE6",fontSize:13,fontWeight:700,margin:"0 0 2px"}}>📅 Compromisos este mes</p>
+              <p style={{color:"#636366",fontSize:12,margin:0}}>
+                {debtAlert} pago{debtAlert!==1?"s":""} pendiente{debtAlert!==1?"s":""}
+              </p>
+            </div>
+            <p style={{color:"#32ADE6",fontSize:16,fontWeight:800,margin:0}}>{MX(debtsDueTotal)}</p>
+          </div>
+        )}
+
+        {soonCards.length>0&&(
+          <div style={{marginTop:10,background:"rgba(255,59,48,0.06)",
+            border:"1px solid rgba(255,59,48,0.14)",borderRadius:14,padding:"11px 14px"}}>
+            <p style={{color:"#FF3B30",fontSize:12,fontWeight:700,margin:"0 0 4px"}}>⏰ Próximos pagos</p>
+            {soonCards.map(c=>(
+              <p key={c.id} style={{color:"#636366",fontSize:12,margin:"2px 0 0"}}>
+                <b style={{color:"#1C1C1E"}}>{c.name}</b> — día {c.payDay||c.cutDay}
+              </p>
+            ))}
+          </div>
+        )}
+
+        {allAlerts.length>0&&(
+          <div style={{marginTop:10,background:"rgba(255,149,0,0.06)",
+            border:"1px solid rgba(255,149,0,0.18)",borderRadius:14,padding:"11px 14px"}}>
+            <p style={{color:"#FF9500",fontSize:12,fontWeight:700,margin:"0 0 4px"}}>🔁 Diferidos en última cuota</p>
+            {allAlerts.map(d=>(
+              <p key={d.id} style={{color:"#636366",fontSize:12,margin:"2px 0 0"}}>
+                <b style={{color:"#1C1C1E"}}>{d.cardName}</b>
+                {d.desc?` · ${d.desc}`:""} — {MX(d.monthlyAmt)} ({d.currentInstall}/{d.totalInstall})
+              </p>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* CARDS LIST */}
+      <div style={{padding:"16px 16px 120px"}}>
+        {cards.length===0?(
+          <div style={{textAlign:"center",padding:"80px 24px 0",color:"#C7C7CC"}}>
+            <p style={{fontSize:58,margin:"0 0 14px"}}>💳</p>
+            <p style={{fontSize:20,fontWeight:700,color:"#3A3A3C",margin:"0 0 8px"}}>Sin tarjetas</p>
+            <p style={{fontSize:14,color:"#8E8E93",lineHeight:1.6,margin:0}}>
+              Toca el botón + para agregar<br/>tu primera tarjeta de crédito
+            </p>
+          </div>
+        ):cards.map((card,idx)=>{
+          const theme  = CARD_THEMES[card.themeIdx??0];
+          const cut    = card.cutDay||1;
+          const pay    = card.payDay||cut;
+          const g=(card.expenses||[]).filter(e=>!e.paid&&getCycleLabel(e.date,cut)==="current"&&!e.alreadyInBalance).reduce((s,e)=>s+e.amount,0);
+          const m=(card.deferred||[]).filter(d=>!d.paid&&!d.alreadyInBalance).reduce((s,d)=>s+d.monthlyAmt,0);
+          const avail  = (card.available||0)-g-m;
+          const lim    = card.limit+(card.limitExt||0);
+          const pct    = Math.min(100,Math.max(0,((lim-avail)/lim)*100));
+          const barC   = pct>85?"#FF3B30":pct>65?"#FF9F0A":theme.bar;
+          const daysPay= daysUntilPay(pay);
+          const daysCut= daysUntilCut(cut);
+          const msiAll = (card.deferred||[]).filter(d=>!d.paid).reduce((s,d)=>s+d.monthlyAmt,0);
+
+          return(
+            <div key={card.id} onClick={()=>setSelected(card)}
+              style={{
+                background:themeBg(theme),
+                borderRadius:24,
+                padding:"22px 20px 18px",
+                marginBottom:14,
+                cursor:"pointer",
+                position:"relative",
+                overflow:"hidden",
+                boxShadow:`0 8px 32px ${theme.bg[0]}55, 0 2px 8px rgba(0,0,0,0.1)`,
+                animation:`fadeUp 0.32s ease ${idx*0.07}s both`
+              }}>
+
+              {/* Decorative circles — same for all, only color changes */}
+              <div style={{position:"absolute",right:-50,top:-50,width:180,height:180,
+                borderRadius:"50%",background:"rgba(255,255,255,0.06)",pointerEvents:"none"}}/>
+              <div style={{position:"absolute",left:-30,bottom:-40,width:140,height:140,
+                borderRadius:"50%",background:"rgba(255,255,255,0.04)",pointerEvents:"none"}}/>
+
+              {/* Chip icon */}
+              <div style={{position:"absolute",top:20,right:20,opacity:0.3}}>
+                <svg width="32" height="24" viewBox="0 0 32 24" fill="none">
+                  <rect x="0" y="4" width="32" height="16" rx="3" fill="rgba(255,255,255,0.6)"/>
+                  <rect x="10" y="0" width="12" height="24" rx="2" fill="rgba(255,255,255,0.4)"/>
+                  <rect x="0" y="9" width="32" height="6" fill="rgba(255,255,255,0.3)"/>
+                </svg>
+              </div>
+
+              {/* Name + util% */}
+              <h3 style={{color:"#fff",fontSize:22,fontWeight:800,margin:"0 0 2px",
+                letterSpacing:-0.3,position:"relative",zIndex:1}}>{card.name}</h3>
+              <p style={{color:"rgba(255,255,255,0.45)",fontSize:11,margin:"0 0 16px",
+                position:"relative",zIndex:1}}>{pct.toFixed(0)}% utilizado</p>
+
+              {/* Available amount */}
+              <p style={{color:avail<0?"#FF453A":theme.bar,fontSize:28,fontWeight:800,
+                margin:"0 0 4px",letterSpacing:-0.5,position:"relative",zIndex:1}}>{MX(avail)}</p>
+              <p style={{color:"rgba(255,255,255,0.4)",fontSize:11,margin:"0 0 14px",
+                position:"relative",zIndex:1}}>disponible</p>
+
+              {/* Usage bar */}
+              <div style={{background:"rgba(255,255,255,0.15)",borderRadius:99,height:4,
+                marginBottom:12,position:"relative",zIndex:1}}>
+                <div style={{width:`${pct}%`,height:"100%",borderRadius:99,background:barC,transition:"width 0.6s ease"}}/>
+              </div>
+
+              {/* Bottom row: corte / pago / tags */}
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",
+                position:"relative",zIndex:1}}>
+                <div style={{display:"flex",gap:10}}>
+                  <span style={{color:"rgba(255,255,255,0.55)",fontSize:11}}>
+                    ✂️ día {cut}
+                    <span style={{color:daysCut<=3?"#FF453A":theme.bar,marginLeft:3}}>
+                      {daysCut===0?"¡hoy!":`en ${daysCut}d`}
+                    </span>
+                  </span>
+                  <span style={{color:"rgba(255,255,255,0.55)",fontSize:11}}>
+                    💳 día {pay}
+                    <span style={{color:daysPay<=5?"#FF453A":theme.bar,marginLeft:3}}>
+                      {daysPay===0?"¡hoy!":`en ${daysPay}d`}
+                    </span>
+                  </span>
+                </div>
+                <div style={{display:"flex",gap:6}}>
+                  {g>0&&<span style={{color:"rgba(255,255,255,0.45)",fontSize:10,
+                    background:"rgba(0,0,0,0.2)",borderRadius:6,padding:"2px 7px"}}>
+                    G {MX(g)}</span>}
+                  {msiAll>0&&<span style={{color:theme.bar,fontSize:10,
+                    background:"rgba(0,0,0,0.2)",borderRadius:6,padding:"2px 7px"}}>
+                    MSI {MX(msiAll)}</span>}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* FAB */}
+      <button onClick={()=>setShowNewCard(true)}
+        style={{position:"fixed",bottom:82,right:20,width:56,height:56,
+          borderRadius:28,background:"#007AFF",border:"none",color:"#fff",
+          fontSize:30,cursor:"pointer",lineHeight:1,zIndex:100,
+          boxShadow:"0 6px 24px rgba(0,122,255,0.45)",
+          display:"flex",alignItems:"center",justifyContent:"center",
+          transition:"transform 0.12s"}}
+        onMouseDown={e=>e.currentTarget.style.transform="scale(0.88)"}
+        onMouseUp={e=>e.currentTarget.style.transform="scale(1)"}>
+        +
+      </button>
+
+      <BottomNav active="cards" onChange={s=>setScreen(s)} debtAlert={debtAlert}/>
+
+      {showNewCard&&<CardForm onSave={addCard} onClose={()=>setShowNewCard(false)}/>}
+
+      <style>{`
+        @keyframes fadeUp{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}
+        input[type=date]::-webkit-calendar-picker-indicator{opacity:0.4}
+        input[type=month]::-webkit-calendar-picker-indicator{opacity:0.4}
+        select option{background:#fff;color:#1C1C1E}
+        *{-webkit-tap-highlight-color:transparent}
+        ::-webkit-scrollbar{display:none}
+        input::placeholder{color:#C7C7CC}
+      `}</style>
+    </div>
+  );
+}
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
