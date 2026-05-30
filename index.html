@@ -23,22 +23,26 @@
 
 // ─── CONSTANTS ────────────────────────────────────────────
 const CARD_THEMES = [
-  { bg: ["#1C1C1E","#3A3A3C"], bar: "#FFD60A",  name: "Grafito"    },
-  { bg: ["#0A2744","#1a5276"], bar: "#4FC3F7",  name: "Zafiro"     },
-  { bg: ["#1A3A2A","#27714f"], bar: "#30D158",  name: "Esmeralda"  },
-  { bg: ["#3A1A2A","#7b2d4e"], bar: "#FF6B9D",  name: "Rubí"       },
-  { bg: ["#2A1A3A","#5e2d8e"], bar: "#BF5AF2",  name: "Amatista"   },
-  { bg: ["#3A2800","#7a5200"], bar: "#FF9F0A",  name: "Ámbar"      },
-  { bg: ["#003A3A","#006666"], bar: "#40E0D0",  name: "Teal"       },
-  { bg: ["#1A1A3A","#2d2d7b"], bar: "#A78BFA",  name: "Índigo"     },
-  { bg: ["#3A1A1A","#7b2020"], bar: "#FF6B35",  name: "Coral"      },
-  { bg: ["#0A1F0A","#145214"], bar: "#A3E635",  name: "Lima"       },
-  { bg: ["#2A2A00","#5c5c00"], bar: "#FDE047",  name: "Citrus"     },
-  { bg: ["#1A002A","#4a006b"], bar: "#F0ABFC",  name: "Orquídea"   },
+  { bg: ["#0f0c29","#302b63","#24243e"], bar: "#a78bfa", name: "Cosmos"    },
+  { bg: ["#000428","#004e92"],           bar: "#60a5fa", name: "Océano"    },
+  { bg: ["#134e5e","#71b280"],           bar: "#6ee7b7", name: "Aurora"    },
+  { bg: ["#1a1a2e","#16213e","#0f3460"], bar: "#818cf8", name: "Medianoche"},
+  { bg: ["#4a0072","#7c3aed"],           bar: "#f0abfc", name: "Galaxia"   },
+  { bg: ["#7f1d1d","#991b1b","#c2410c"], bar: "#fca5a5", name: "Volcanic"  },
+  { bg: ["#064e3b","#065f46"],           bar: "#34d399", name: "Selva"     },
+  { bg: ["#1e3a5f","#1e40af","#1d4ed8"], bar: "#93c5fd", name: "Zafiro"    },
+  { bg: ["#4a1942","#6b21a8","#7e22ce"], bar: "#e879f9", name: "Nebula"    },
+  { bg: ["#0c1445","#1e3a8a","#1d4ed8"], bar: "#fbbf24", name: "Índigo ✦" },
+  { bg: ["#1c1917","#292524","#44403c"], bar: "#d6d3d1", name: "Carbón"    },
+  { bg: ["#042f2e","#134e4a","#0f766e"], bar: "#2dd4bf", name: "Teal"      },
+  { bg: ["#431407","#7c2d12","#9a3412"], bar: "#fb923c", name: "Magma"     },
+  { bg: ["#0d0d0d","#1a1a1a"],           bar: "#f59e0b", name: "Obsidiana" },
+  { bg: ["#1e1b4b","#312e81","#4338ca"], bar: "#a5b4fc", name: "Iris"      },
+  { bg: ["#0a0a0a","#1f2937","#374151"], bar: "#f9fafb", name: "Acero"     },
 ];
 
 const CATEGORIES = [
-  "🛒 Supermercado","🍔 Comida","⛽ Gasolina","🚗 Auto","🏥 Salud",
+  "🛒 Supermercado","🍽️ Comida","⛽ Gasolina","🚗 Auto","🏥 Salud",
   "🎬 Entretenimiento","👕 Ropa","🏠 Hogar","🔧 Servicios",
   "✈️ Viajes","🎓 Educación","💊 Farmacia","📦 Otro"
 ];
@@ -151,6 +155,8 @@ function healthScore(cards){
 }
 
 function themeBg(theme) {
+  if(theme.bg.length===3)
+    return `linear-gradient(145deg, ${theme.bg[0]} 0%, ${theme.bg[1]} 55%, ${theme.bg[2]} 100%)`;
   return `linear-gradient(145deg, ${theme.bg[0]} 0%, ${theme.bg[1]} 100%)`;
 }
 
@@ -1147,20 +1153,263 @@ function CardDetail({card, onBack, onUpdate, onDelete}){
   );
 }
 
+
+// ─── RESUMEN VIEW ─────────────────────────────────────────
+function ResumenView({history, income, onSetIncome, cards, debts, currentYM}){
+  const [editingIncome, setEditingIncome] = useState(false);
+  const [incomeInput, setIncomeInput]     = useState(income||"");
+
+  // Build last 6 months of data
+  const months = Array.from({length:6},(_,i)=>monthKey(-(5-i)));
+  const histData = months.map(ym=>{
+    const h = history[ym]||{expenses:0,msi:0,debts:0,income:0};
+    const total = h.expenses + h.msi + h.debts;
+    return { ym, label:monthLabel(ym).split(" ")[0], ...h, total };
+  });
+
+  const maxVal = Math.max(...histData.map(d=>Math.max(d.total, d.income||0)), 1);
+
+  // Current month calcs
+  const cur       = histData[histData.length-1];
+  const eff_income = income || cur.income || 0;
+  const totalCost  = cur.total;
+  const margen     = eff_income - totalCost;
+  const pctUsed    = eff_income>0 ? Math.min(100,(totalCost/eff_income)*100) : 0;
+  const alcanza    = eff_income > 0 && margen >= 0;
+
+  // Trend: compare last 2 months
+  const prev  = histData[histData.length-2];
+  const trend = cur.total - prev.total;
+
+  function saveIncome(){
+    onSetIncome(parseFloat(incomeInput)||0);
+    setEditingIncome(false);
+  }
+
+  const BAR_H = 140;
+
+  return(
+    <div style={{minHeight:"100vh",background:"#F2F2F7",fontFamily:"'SF Pro Text',-apple-system,sans-serif",paddingBottom:120}}>
+
+      {/* Header */}
+      <div style={{background:"#fff",padding:"52px 20px 18px",borderBottom:"1px solid #E5E5EA"}}>
+        <p style={{color:"#8E8E93",fontSize:11,fontWeight:700,letterSpacing:0.8,textTransform:"uppercase",margin:"0 0 3px"}}>Finanzas personales</p>
+        <h1 style={{color:"#1C1C1E",fontSize:28,fontWeight:800,margin:0,letterSpacing:-0.3}}>Resumen</h1>
+      </div>
+
+      <div style={{padding:"16px"}}>
+
+        {/* ── Ingreso mensual ── */}
+        <div style={{background:"#fff",borderRadius:18,overflow:"hidden",marginBottom:14,
+          boxShadow:"0 1px 3px rgba(0,0,0,0.06)"}}>
+          <div style={{padding:"14px 16px",borderBottom:"1px solid #F2F2F7",
+            display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <div>
+              <p style={{color:"#8E8E93",fontSize:11,fontWeight:700,letterSpacing:0.5,textTransform:"uppercase",margin:"0 0 2px"}}>Ingreso mensual</p>
+              {editingIncome?(
+                <div style={{display:"flex",alignItems:"center",gap:8,marginTop:4}}>
+                  <input autoFocus style={{border:"none",outline:"none",fontSize:22,fontWeight:800,
+                    color:"#34C759",fontFamily:"inherit",background:"transparent",width:160,
+                    WebkitAppearance:"none"}}
+                    type="number" placeholder="0.00" value={incomeInput}
+                    onChange={e=>setIncomeInput(e.target.value)}
+                    onKeyDown={e=>e.key==="Enter"&&saveIncome()}/>
+                  <button onClick={saveIncome}
+                    style={{background:"#34C759",color:"#fff",border:"none",borderRadius:10,
+                      padding:"6px 14px",fontSize:13,fontWeight:700,cursor:"pointer"}}>OK</button>
+                </div>
+              ):(
+                <p style={{color:"#34C759",fontSize:24,fontWeight:800,margin:0,letterSpacing:-0.5}}>
+                  {eff_income>0?MX(eff_income):"No definido"}
+                </p>
+              )}
+            </div>
+            {!editingIncome&&(
+              <button onClick={()=>{setIncomeInput(income||"");setEditingIncome(true);}}
+                style={{background:"#F2F2F7",border:"none",borderRadius:10,padding:"7px 14px",
+                  fontSize:13,fontWeight:600,color:"#636366",cursor:"pointer"}}>
+                {eff_income>0?"Editar":"+ Agregar"}
+              </button>
+            )}
+          </div>
+
+          {/* ¿Alcanza? banner */}
+          {eff_income>0&&(
+            <div style={{padding:"14px 16px",background:alcanza?"rgba(52,199,89,0.06)":"rgba(255,59,48,0.06)"}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10}}>
+                <div>
+                  <p style={{color:alcanza?"#34C759":"#FF3B30",fontSize:13,fontWeight:700,margin:"0 0 2px"}}>
+                    {alcanza?"✅ Sí alcanza":"❌ No alcanza"}
+                  </p>
+                  <p style={{color:"#8E8E93",fontSize:12,margin:0}}>
+                    {alcanza
+                      ? `Te sobran ${MX(margen)} este mes`
+                      : `Te faltan ${MX(Math.abs(margen))} para cubrir todo`}
+                  </p>
+                </div>
+                <div style={{textAlign:"right"}}>
+                  <p style={{color:"#8E8E93",fontSize:11,margin:"0 0 1px"}}>Comprometido</p>
+                  <p style={{color:pctUsed>90?"#FF3B30":pctUsed>70?"#FF9F0A":"#1C1C1E",
+                    fontSize:18,fontWeight:800,margin:0}}>{pctUsed.toFixed(0)}%</p>
+                </div>
+              </div>
+              {/* Barra ingreso vs gasto */}
+              <div style={{background:"#E5E5EA",borderRadius:99,height:8,overflow:"hidden"}}>
+                <div style={{width:`${pctUsed}%`,height:"100%",borderRadius:99,
+                  background:pctUsed>90?"#FF3B30":pctUsed>70?"#FF9F0A":"#34C759",
+                  transition:"width 0.6s ease"}}/>
+              </div>
+              {/* Desglose */}
+              <div style={{display:"flex",gap:8,marginTop:12}}>
+                {[
+                  {l:"Tarjetas",v:cur.expenses+cur.msi,c:"#007AFF"},
+                  {l:"Compromisos",v:cur.debts,c:"#32ADE6"},
+                  {l:"Margen",v:margen,c:margen>=0?"#34C759":"#FF3B30"},
+                ].map(s=>(
+                  <div key={s.l} style={{flex:1,background:"rgba(0,0,0,0.04)",borderRadius:10,padding:"8px 10px"}}>
+                    <p style={{color:"#8E8E93",fontSize:9,fontWeight:700,textTransform:"uppercase",letterSpacing:0.4,margin:"0 0 2px"}}>{s.l}</p>
+                    <p style={{color:s.c,fontSize:13,fontWeight:800,margin:0}}>{MX(s.v)}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* ── Gráfica de barras últimos 6 meses ── */}
+        <div style={{background:"#fff",borderRadius:18,padding:"16px",marginBottom:14,
+          boxShadow:"0 1px 3px rgba(0,0,0,0.06)"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+            <div>
+              <p style={{color:"#1C1C1E",fontSize:15,fontWeight:700,margin:"0 0 2px"}}>Gasto mensual</p>
+              <p style={{color:"#8E8E93",fontSize:12,margin:0}}>
+                {trend>0?`↑ ${MX(trend)} vs mes anterior`:trend<0?`↓ ${MX(Math.abs(trend))} vs mes anterior`:"Sin cambio"}
+              </p>
+            </div>
+            {/* Leyenda */}
+            <div style={{display:"flex",flexDirection:"column",gap:3}}>
+              {[{c:"#007AFF",l:"Gastos"},{c:"#AF52DE",l:"MSI"},{c:"#32ADE6",l:"Compromisos"}].map(i=>(
+                <div key={i.l} style={{display:"flex",alignItems:"center",gap:4}}>
+                  <div style={{width:8,height:8,borderRadius:2,background:i.c,flexShrink:0}}/>
+                  <span style={{color:"#8E8E93",fontSize:10}}>{i.l}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* SVG bar chart */}
+          <div style={{overflowX:"auto"}}>
+            <svg width="100%" viewBox={`0 0 ${months.length*56} ${BAR_H+40}`}
+              style={{display:"block",minWidth:280}}>
+              {histData.map((d,i)=>{
+                const x     = i*56+6;
+                const bw    = 44;
+                const scale = v => BAR_H * (v/maxVal);
+                const eH    = scale(d.expenses);
+                const mH    = scale(d.msi);
+                const dH    = scale(d.debts);
+                const totalH= eH+mH+dH;
+                const isNow = d.ym===currentYM;
+                return(
+                  <g key={d.ym}>
+                    {/* income line marker */}
+                    {eff_income>0&&i===months.length-1&&(
+                      <line x1={x} y1={BAR_H-scale(eff_income)} x2={x+bw} y2={BAR_H-scale(eff_income)}
+                        stroke="#34C759" strokeWidth="1.5" strokeDasharray="3,2"/>
+                    )}
+                    {/* stacked bars */}
+                    {d.debts>0&&<rect x={x} y={BAR_H-totalH} width={bw} height={dH} rx="0" fill="#32ADE6" opacity="0.85"/>}
+                    {d.msi>0&&<rect x={x} y={BAR_H-eH-mH} width={bw} height={mH} rx="0" fill="#AF52DE" opacity="0.85"/>}
+                    {d.expenses>0&&<rect x={x} y={BAR_H-eH} width={bw} height={eH} rx="3" fill="#007AFF" opacity="0.85"/>}
+                    {/* empty bar placeholder */}
+                    {totalH===0&&<rect x={x} y={BAR_H-3} width={bw} height={3} rx="1.5" fill="#E5E5EA"/>}
+                    {/* month label */}
+                    <text x={x+bw/2} y={BAR_H+14} textAnchor="middle"
+                      fill={isNow?"#007AFF":"#8E8E93"} fontSize="10" fontWeight={isNow?"700":"500"}>
+                      {d.label}
+                    </text>
+                    {/* total label on top */}
+                    {totalH>12&&(
+                      <text x={x+bw/2} y={BAR_H-totalH-4} textAnchor="middle"
+                        fill="#636366" fontSize="9" fontWeight="600">
+                        {(d.total/1000).toFixed(1)}k
+                      </text>
+                    )}
+                    {/* current month highlight */}
+                    {isNow&&<rect x={x} y={BAR_H+18} width={bw} height={2} rx="1" fill="#007AFF"/>}
+                  </g>
+                );
+              })}
+              {/* income global dashed line */}
+              {eff_income>0&&(
+                <line x1="0" y1={BAR_H-BAR_H*(eff_income/maxVal)}
+                  x2={months.length*56} y2={BAR_H-BAR_H*(eff_income/maxVal)}
+                  stroke="#34C759" strokeWidth="1" strokeDasharray="4,3" opacity="0.5"/>
+              )}
+            </svg>
+          </div>
+        </div>
+
+        {/* ── Tabla mensual detallada ── */}
+        <div style={{background:"#fff",borderRadius:18,overflow:"hidden",marginBottom:14,
+          boxShadow:"0 1px 3px rgba(0,0,0,0.06)"}}>
+          <div style={{padding:"14px 16px",borderBottom:"1px solid #F2F2F7"}}>
+            <p style={{color:"#1C1C1E",fontSize:15,fontWeight:700,margin:0}}>Detalle por mes</p>
+          </div>
+          {[...histData].reverse().map((d,i,arr)=>{
+            const hasData = d.total>0;
+            return(
+              <div key={d.ym} style={{padding:"12px 16px",
+                borderBottom:i<arr.length-1?"1px solid #F2F2F7":"none",
+                background:d.ym===currentYM?"rgba(0,122,255,0.03)":"transparent"}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:hasData?6:0}}>
+                  <div style={{display:"flex",alignItems:"center",gap:8}}>
+                    <p style={{color:d.ym===currentYM?"#007AFF":"#1C1C1E",fontSize:14,fontWeight:600,margin:0}}>
+                      {monthLabel(d.ym)}
+                    </p>
+                    {d.ym===currentYM&&<span style={{fontSize:9,fontWeight:700,color:"#007AFF",background:"rgba(0,122,255,0.1)",borderRadius:4,padding:"1px 5px"}}>HOY</span>}
+                  </div>
+                  <p style={{color:hasData?"#1C1C1E":"#C7C7CC",fontSize:15,fontWeight:700,margin:0}}>
+                    {hasData?MX(d.total):"Sin datos"}
+                  </p>
+                </div>
+                {hasData&&(
+                  <div style={{display:"flex",gap:6}}>
+                    {d.expenses>0&&<span style={{fontSize:10,color:"#007AFF",background:"rgba(0,122,255,0.08)",borderRadius:5,padding:"1px 6px",fontWeight:600}}>G {MX(d.expenses)}</span>}
+                    {d.msi>0&&<span style={{fontSize:10,color:"#AF52DE",background:"rgba(175,82,222,0.08)",borderRadius:5,padding:"1px 6px",fontWeight:600}}>MSI {MX(d.msi)}</span>}
+                    {d.debts>0&&<span style={{fontSize:10,color:"#32ADE6",background:"rgba(50,173,230,0.08)",borderRadius:5,padding:"1px 6px",fontWeight:600}}>C {MX(d.debts)}</span>}
+                    {(d.income||eff_income)>0&&<span style={{fontSize:10,color:"#34C759",background:"rgba(52,199,89,0.08)",borderRadius:5,padding:"1px 6px",fontWeight:600}}>↑ {MX(d.income||eff_income)}</span>}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+      </div>
+    </div>
+  );
+}
+
 // ─── BOTTOM NAV ───────────────────────────────────────────
 function BottomNav({active,onChange,debtAlert}){
+  const tabs=[
+    {id:"cards",   icon:"💳", label:"Tarjetas"},
+    {id:"debts",   icon:"📅", label:"Compromisos", alert:debtAlert},
+    {id:"resumen", icon:"📊", label:"Resumen"},
+  ];
   return(
     <div style={{position:"fixed",bottom:0,left:0,right:0,zIndex:200,
       background:"rgba(255,255,255,0.94)",backdropFilter:"blur(20px)",WebkitBackdropFilter:"blur(20px)",
       borderTop:"0.5px solid rgba(0,0,0,0.1)",display:"flex",
       paddingBottom:"env(safe-area-inset-bottom,14px)"}}>
-      {[{id:"cards",icon:"💳",label:"Tarjetas"},{id:"debts",icon:"📅",label:"Compromisos",alert:debtAlert}].map(t=>(
+      {tabs.map(t=>(
         <button key={t.id} onClick={()=>onChange(t.id)}
           style={{flex:1,padding:"11px 0 8px",background:"none",border:"none",cursor:"pointer",
             display:"flex",flexDirection:"column",alignItems:"center",gap:3,position:"relative"}}>
-          <span style={{fontSize:24,lineHeight:1,filter:active===t.id?"none":"grayscale(1) opacity(0.4)"}}>{t.icon}</span>
+          <span style={{fontSize:22,lineHeight:1,filter:active===t.id?"none":"grayscale(1) opacity(0.4)"}}>{t.icon}</span>
           <span style={{fontSize:10,fontWeight:700,color:active===t.id?"#007AFF":"#8E8E93"}}>{t.label}</span>
-          {t.alert>0&&(
+          {(t.alert||0)>0&&(
             <span style={{position:"absolute",top:7,right:"calc(50% - 20px)",background:"#FF3B30",color:"#fff",
               fontSize:10,fontWeight:800,borderRadius:99,minWidth:17,height:17,
               display:"flex",alignItems:"center",justifyContent:"center",padding:"0 4px"}}>
@@ -1175,11 +1424,13 @@ function BottomNav({active,onChange,debtAlert}){
 
 // ─── HOME / DASHBOARD ─────────────────────────────────────
 function App(){
-  const [cards,setCards]       = useLS("fn3_cards",[]);
-  const [debts,setDebts]       = useLS("fn3_debts",[]);
-  const [selected,setSelected] = useState(null);
-  const [showNewCard,setNewCard]= useState(false);
-  const [screen,setScreen]     = useState("cards");
+  const [cards,setCards]         = useLS("fn3_cards",[]);
+  const [debts,setDebts]         = useLS("fn3_debts",[]);
+  const [history,setHistory]     = useLS("fn3_history",{});   // {ym: {expenses,msi,debts,income}}
+  const [income,setIncome]       = useLS("fn3_income",0);     // ingreso mensual
+  const [selected,setSelected]   = useState(null);
+  const [showNewCard,setNewCard]  = useState(false);
+  const [screen,setScreen]       = useState("cards");
 
   const updateCard = u=>{setCards(prev=>prev.map(c=>c.id===u.id?u:c));setSelected(u);};
   const deleteCard = id=>{setCards(prev=>prev.filter(c=>c.id!==id));setSelected(null);};
@@ -1220,6 +1471,31 @@ function App(){
       </>
     );
   }
+  if(screen==="resumen"){
+    return(
+      <>
+        <ResumenView history={history} income={income} onSetIncome={setIncome}
+          cards={cards} debts={debts} currentYM={currentYM}/>
+        <BottomNav active="resumen" onChange={s=>setScreen(s)} debtAlert={debtAlert}/>
+      </>
+    );
+  }
+
+  // ── Snapshot del mes actual al historial ──
+  useEffect(()=>{
+    if(!cards.length) return;
+    const ym = currentMonthKey();
+    const exp = cards.reduce((s,c)=>s+(c.expenses||[]).filter(e=>getCycleLabel(e.date,c.cutDay)==="current").reduce((a,e)=>a+e.amount,0),0);
+    const msi = cards.reduce((s,c)=>s+(c.deferred||[]).filter(d=>!msiIsFullyPaid(d)).reduce((a,d)=>a+d.monthlyAmt,0),0);
+    const dbt = debts.filter(d=>{
+      if(!d.recurring) return d.yearMonth===ym;
+      const[sy,sm]=d.yearMonth.split("-").map(Number);
+      const[ty,tm]=ym.split("-").map(Number);
+      const off=(ty*12+tm)-(sy*12+sm);
+      return off>=0&&(!d.recurMonths||off<d.recurMonths);
+    }).reduce((s,d)=>s+d.amount,0);
+    setHistory(prev=>({...prev,[ym]:{expenses:exp,msi,debts:dbt,income}}));
+  },[cards,debts,income]);
 
   const totalLimit = cards.reduce((s,c)=>s+c.limit+(c.limitExt||0),0);
   const totalAvail = cards.reduce((s,c)=>{
