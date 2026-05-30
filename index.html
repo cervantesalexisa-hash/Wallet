@@ -111,17 +111,31 @@ function useLS(key, init){
 }
 
 // ─── MSI HELPERS ──────────────────────────────────────────
-// Un MSI tiene: monthlyAmt, totalInstall, paidMonths: {ym: true}
-// La cuota actual se marca pagada en el mes en curso (currentMonthKey).
-// Cuotas pagadas = Object.keys(paidMonths).length
-// Cuota del mes actual pagada = paidMonths[currentMonthKey()] === true
+// Cada MSI tiene:
+//   startMonth: "YYYY-MM"  → mes de la primera cuota
+//   totalInstall: número total de cuotas
+//   paidMonths: { "YYYY-MM": true }  → cuotas ya marcadas pagadas
+function addMonths(ym, n) {
+  const [y, m] = ym.split("-").map(Number);
+  const d = new Date(y, m - 1 + n, 1);
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
+}
+function msiMonths(d) {
+  const start = d.startMonth || currentMonthKey();
+  return Array.from({length: d.totalInstall}, (_, i) => addMonths(start, i));
+}
 function msiPaidCount(d) { return Object.keys(d.paidMonths||{}).length; }
 function msiRemainingAmt(d) {
   const paid = msiPaidCount(d);
   return (d.totalInstall - paid) * d.monthlyAmt;
 }
 function msiIsFullyPaid(d) { return msiPaidCount(d) >= d.totalInstall; }
-function msiCurrentPaid(d) { return !!(d.paidMonths||{})[currentMonthKey()]; }
+// Retorna el primer mes de cuota no pagado
+function msiNextUnpaidMonth(d) {
+  if (msiIsFullyPaid(d)) return null;
+  return msiMonths(d).find(ym => !(d.paidMonths||{})[ym]) || null;
+}
+function msiMonthPaid(d, ym) { return !!(d.paidMonths||{})[ym]; }
 
 function healthScore(cards){
   if(!cards.length) return 100;
@@ -355,28 +369,37 @@ function ExpenseForm({onSave, onClose, cutDay}){
 }
 
 // ─── DEFERRED FORM ────────────────────────────────────────
-// MSI rediseñado: paidMonths = registro por mes. totalInstall es el total.
-// currentInstall se calcula del historial.
 function DeferredForm({onSave,onClose,initial}){
-  const [desc,setDesc]       = useState(initial?.desc||"");
-  const [monthlyAmt,setAmt]  = useState(initial?.monthlyAmt||"");
-  const [total,setTotal]     = useState(initial?.totalInstall||"");
-  const [inBal,setInBal]     = useState(initial?.alreadyInBalance??true);
-
-  // Para edición: no editar paidMonths
+  const now = new Date();
+  const defaultStart = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`;
+  const [desc,setDesc]         = useState(initial?.desc||"");
+  const [monthlyAmt,setAmt]    = useState(initial?.monthlyAmt||"");
+  const [total,setTotal]       = useState(initial?.totalInstall||"");
+  const [startMonth,setStart]  = useState(initial?.startMonth||defaultStart);
+  const [inBal,setInBal]       = useState(initial?.alreadyInBalance??true);
   const isEdit = !!initial;
+
+  // Cuotas ya pagadas = las que cayeron en meses <= hoy y están en paidMonths
+  const previewMonths = (() => {
+    if (!total || !startMonth) return [];
+    return Array.from({length:parseInt(total)},(_,i)=>addMonths(startMonth,i));
+  })();
+
+  const totalDebt = parseFloat(monthlyAmt||0) * parseInt(total||0);
 
   return(
     <Modal title={isEdit?"Editar MSI":"Agregar MSI / Diferido"} onClose={onClose}>
-      {/* Info card de deuda total */}
-      {!isEdit&&monthlyAmt&&total&&(
-        <div style={{background:"rgba(175,82,222,0.1)",borderRadius:14,padding:"13px 15px",marginBottom:14,
-          border:"1px solid rgba(175,82,222,0.2)"}}>
+      {!isEdit && monthlyAmt && total && (
+        <div style={{background:"rgba(175,82,222,0.1)",borderRadius:14,padding:"13px 15px",marginBottom:14,border:"1px solid rgba(175,82,222,0.2)"}}>
           <p style={{color:"#8E8E93",fontSize:11,fontWeight:600,margin:"0 0 3px"}}>DEUDA TOTAL DEL MSI</p>
-          <p style={{color:"#AF52DE",fontSize:22,fontWeight:800,margin:0}}>
-            {MX(parseFloat(monthlyAmt||0)*parseInt(total||0))}
-          </p>
+          <p style={{color:"#AF52DE",fontSize:22,fontWeight:800,margin:0}}>{MX(totalDebt)}</p>
           <p style={{color:"#8E8E93",fontSize:12,margin:"3px 0 0"}}>{total} pagos de {MX(parseFloat(monthlyAmt||0))}</p>
+          {previewMonths.length>0&&(
+            <p style={{color:"#8E8E93",fontSize:11,margin:"4px 0 0"}}>
+              Primera cuota: <b style={{color:"#AF52DE"}}>{monthLabel(previewMonths[0])}</b>
+              {" · "}Última: <b style={{color:"#AF52DE"}}>{monthLabel(previewMonths[previewMonths.length-1])}</b>
+            </p>
+          )}
         </div>
       )}
 
@@ -384,32 +407,34 @@ function DeferredForm({onSave,onClose,initial}){
         <div style={{padding:"13px 15px",borderBottom:"1px solid #F2F2F7"}}>
           <p style={{color:"#8E8E93",fontSize:11,fontWeight:600,margin:"0 0 3px"}}>Descripción (opcional)</p>
           <input style={{display:"block",width:"100%",border:"none",outline:"none",fontSize:16,
-            fontWeight:500,color:"#1C1C1E",fontFamily:"inherit",background:"transparent",
-            padding:0,WebkitAppearance:"none"}}
-            placeholder="ej. Laptop, Viaje..." value={desc} onChange={e=>setDesc(e.target.value)}/>
+            fontWeight:500,color:"#1C1C1E",fontFamily:"inherit",background:"transparent",padding:0,WebkitAppearance:"none"}}
+            placeholder="ej. iPhone, Laptop..." value={desc} onChange={e=>setDesc(e.target.value)}/>
         </div>
         <div style={{padding:"13px 15px",borderBottom:"1px solid #F2F2F7"}}>
           <p style={{color:"#8E8E93",fontSize:11,fontWeight:600,margin:"0 0 3px"}}>Cuota mensual</p>
           <input style={{display:"block",width:"100%",border:"none",outline:"none",fontSize:16,
-            fontWeight:500,color:"#1C1C1E",fontFamily:"inherit",background:"transparent",
-            padding:0,WebkitAppearance:"none"}}
+            fontWeight:500,color:"#1C1C1E",fontFamily:"inherit",background:"transparent",padding:0,WebkitAppearance:"none"}}
             type="number" placeholder="1058.05" value={monthlyAmt} onChange={e=>setAmt(e.target.value)}/>
         </div>
         <div style={{padding:"13px 15px",borderBottom:"1px solid #F2F2F7"}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
             <p style={{color:"#8E8E93",fontSize:11,fontWeight:600,margin:0}}>Total de cuotas</p>
             <input style={{width:70,border:"none",outline:"none",fontSize:16,fontWeight:700,
-              color:"#1C1C1E",textAlign:"right",fontFamily:"inherit",
-              background:"transparent",WebkitAppearance:"none"}}
+              color:"#1C1C1E",textAlign:"right",fontFamily:"inherit",background:"transparent",WebkitAppearance:"none"}}
               type="number" placeholder="9" value={total} onChange={e=>setTotal(e.target.value)}/>
           </div>
         </div>
-        {!isEdit&&(
-          <div style={{padding:"13px 15px",borderBottom:"1px solid #F2F2F7"}}>
-            <p style={{color:"#8E8E93",fontSize:11,fontWeight:600,margin:"0 0 4px"}}>¿Cuántas cuotas ya pagaste?</p>
-            <AlreadyPaidPicker total={parseInt(total)||0} onSelect={n=>window._msiPrePaid=n}/>
+        <div style={{padding:"13px 15px",borderBottom:"1px solid #F2F2F7"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <div>
+              <p style={{color:"#8E8E93",fontSize:11,fontWeight:600,margin:"0 0 2px"}}>Mes de la primera cuota</p>
+              <p style={{color:"#C7C7CC",fontSize:10,margin:0}}>¿En qué mes fue tu primer cobro?</p>
+            </div>
+            <input style={{border:"none",outline:"none",fontSize:15,fontWeight:600,
+              color:"#1C1C1E",fontFamily:"inherit",background:"transparent",colorScheme:"light"}}
+              type="month" value={startMonth} onChange={e=>setStart(e.target.value)}/>
           </div>
-        )}
+        </div>
         <div style={{padding:"13px 15px"}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
             <div>
@@ -425,29 +450,37 @@ function DeferredForm({onSave,onClose,initial}){
           </div>
         </div>
       </div>
+
+      {/* Si es nuevo MSI, marcar cuotas pasadas ya pagadas */}
+      {!isEdit && previewMonths.length>0 && (()=>{
+        const nowYM = currentMonthKey();
+        const pastMonths = previewMonths.filter(ym=>ym<nowYM);
+        if(!pastMonths.length) return null;
+        return(
+          <div style={{background:"#fff",borderRadius:16,overflow:"hidden",marginBottom:16}}>
+            <div style={{padding:"13px 15px",borderBottom:"1px solid #F2F2F7"}}>
+              <p style={{color:"#8E8E93",fontSize:11,fontWeight:600,margin:"0 0 2px"}}>Cuotas ya pagadas</p>
+              <p style={{color:"#C7C7CC",fontSize:10,margin:0}}>Toca los meses que ya pagaste</p>
+            </div>
+            <PastMonthsPicker months={pastMonths} onChange={ms=>window._msiPrePaidMonths=ms}/>
+          </div>
+        );
+      })()}
+
       <div style={{display:"flex",gap:10}}>
         <Btn variant="secondary" onClick={onClose}>Cancelar</Btn>
         <Btn onClick={()=>{
-          if(!monthlyAmt||!total) return;
-          const prePaid = isEdit ? 0 : (window._msiPrePaid||0);
-          // Generar paidMonths falsos para las cuotas ya pagadas (meses anteriores)
-          const pm = {};
-          if(!isEdit && prePaid>0){
-            const now = new Date();
-            for(let i=prePaid;i>=1;i--){
-              const d = new Date(now.getFullYear(), now.getMonth()-i, 1);
-              const k = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
-              pm[k] = true;
-            }
-          }
+          if(!monthlyAmt||!total||!startMonth) return;
           if(isEdit){
             onSave({...initial,desc,monthlyAmt:parseFloat(monthlyAmt),
-              totalInstall:parseInt(total),alreadyInBalance:inBal});
+              totalInstall:parseInt(total),startMonth,alreadyInBalance:inBal});
           } else {
+            const pm = {};
+            ((window._msiPrePaidMonths)||[]).forEach(ym=>{ pm[ym]=true; });
             onSave({id:Date.now(),desc,monthlyAmt:parseFloat(monthlyAmt),
-              totalInstall:parseInt(total),paidMonths:pm,alreadyInBalance:inBal});
+              totalInstall:parseInt(total),startMonth,paidMonths:pm,alreadyInBalance:inBal});
           }
-          window._msiPrePaid=0;
+          window._msiPrePaidMonths=[];
         }}>Guardar</Btn>
       </div>
       {isEdit&&<div style={{marginTop:10}}><Btn variant="danger" full onClick={()=>onSave(null)}>Eliminar MSI</Btn></div>}
@@ -455,26 +488,27 @@ function DeferredForm({onSave,onClose,initial}){
   );
 }
 
-// Selector de cuotas ya pagadas
-function AlreadyPaidPicker({total, onSelect}){
-  const [n,setN] = useState(0);
+// Selector de meses pasados ya pagados
+function PastMonthsPicker({months, onChange}){
+  const [sel,setSel] = useState([]);
+  const toggle = ym => {
+    const next = sel.includes(ym) ? sel.filter(m=>m!==ym) : [...sel,ym];
+    setSel(next);
+    onChange(next);
+  };
   return(
-    <div>
-      <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:4}}>
-        {Array.from({length:Math.min(total+1,13)},(_,i)=>(
-          <div key={i} onClick={()=>{setN(i);onSelect(i);}}
-            style={{width:36,height:36,borderRadius:18,
-              background:n===i?"#AF52DE":"#F2F2F7",
-              color:n===i?"#fff":"#636366",
-              display:"flex",alignItems:"center",justifyContent:"center",
-              fontSize:14,fontWeight:700,cursor:"pointer",transition:"all 0.15s"}}>
-            {i}
+    <div style={{padding:"10px 15px",display:"flex",gap:6,flexWrap:"wrap"}}>
+      {months.map(ym=>{
+        const on = sel.includes(ym);
+        return(
+          <div key={ym} onClick={()=>toggle(ym)}
+            style={{borderRadius:10,padding:"6px 12px",cursor:"pointer",transition:"all 0.15s",
+              background:on?"#AF52DE":"#F2F2F7",color:on?"#fff":"#636366",
+              fontSize:12,fontWeight:700}}>
+            {monthLabel(ym)}
           </div>
-        ))}
-      </div>
-      <p style={{color:"#8E8E93",fontSize:11,margin:"6px 0 0"}}>
-        {n===0?"Empezando desde cero":`${n} cuota${n!==1?"s":""} ya pagada${n!==1?"s":""}`}
-      </p>
+        );
+      })}
     </div>
   );
 }
@@ -750,13 +784,12 @@ function CardDetail({card, onBack, onUpdate, onDelete}){
   };
   const deleteExp = id => onUpdate({...card,expenses:expenses.filter(e=>e.id!==id)});
 
-  // ── MSI toggle: marca/desmarca el mes actual en paidMonths ──
-  // Al pagar: available sube por la cuota (se liberó crédito)
-  // Al despagar: available baja
-  const toggleDef = id => {
+  // ── MSI toggle: marca el siguiente mes pendiente, o lo desmarca ──
+  const toggleDef = (id, forceYm) => {
     const def=deferred.find(d=>d.id===id); if(!def) return;
-    const ym=currentMonthKey();
-    const wasPaid=!!(def.paidMonths||{})[ym];
+    const ym = forceYm || msiNextUnpaidMonth(def);
+    if(!ym) return;
+    const wasPaid = msiMonthPaid(def, ym);
     const delta = wasPaid ? -def.monthlyAmt : def.monthlyAmt;
     const newPM={...(def.paidMonths||{})};
     if(wasPaid) delete newPM[ym]; else newPM[ym]=true;
@@ -967,11 +1000,10 @@ function CardDetail({card, onBack, onUpdate, onDelete}){
                 <p style={{fontSize:15,color:"#8E8E93"}}>Sin diferidos registrados</p>
               </div>
             ):deferred.map(d=>{
-              const paid     = msiPaidCount(d);
-              const remaining = d.totalInstall - paid;
-              const paidThisMonth = msiCurrentPaid(d);
-              const fullyPaid = msiIsFullyPaid(d);
-              const progPct  = (paid/d.totalInstall)*100;
+              const paid       = msiPaidCount(d);
+              const remaining  = d.totalInstall - paid;
+              const fullyPaid  = msiIsFullyPaid(d);
+              const progPct    = (paid/d.totalInstall)*100;
               const remainingAmt = msiRemainingAmt(d);
 
               return(
@@ -1021,22 +1053,42 @@ function CardDetail({card, onBack, onUpdate, onDelete}){
                     )}
                   </div>
 
-                  {/* Palomear cuota de este mes */}
+                  {/* Lista de todas las cuotas con su mes */}
                   {!fullyPaid&&(
-                    <div style={{padding:"13px 16px",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-                      <div>
-                        <p style={{color:"#1C1C1E",fontSize:14,fontWeight:600,margin:"0 0 2px"}}>Cuota de {monthLabel(currentMonthKey())}</p>
-                        <p style={{color:"#8E8E93",fontSize:12,margin:0}}>{MX(d.monthlyAmt)} · cuota {paid+(paidThisMonth?0:1)} de {d.totalInstall}</p>
-                      </div>
-                      <div onClick={()=>toggleDef(d.id)}
-                        style={{width:30,height:30,borderRadius:15,flexShrink:0,
-                          border:paidThisMonth?"none":"2.5px solid #D1D1D6",
-                          background:paidThisMonth?"#34C759":"transparent",
-                          cursor:"pointer",display:"flex",alignItems:"center",
-                          justifyContent:"center",transition:"all 0.2s",
-                          boxShadow:paidThisMonth?"0 2px 8px rgba(52,199,89,0.4)":"none"}}>
-                        {paidThisMonth&&<span style={{color:"#fff",fontSize:16,fontWeight:800}}>✓</span>}
-                      </div>
+                    <div>
+                      {msiMonths(d).map((ym,idx)=>{
+                        const isPaid = msiMonthPaid(d,ym);
+                        const isNext = !isPaid && msiMonths(d).slice(0,idx).every(m=>msiMonthPaid(d,m));
+                        const nowYM  = currentMonthKey();
+                        const isFuture = ym > nowYM;
+                        return(
+                          <div key={ym} style={{padding:"11px 16px",display:"flex",alignItems:"center",
+                            justifyContent:"space-between",borderTop:"1px solid #F2F2F7",
+                            opacity:isFuture&&!isNext?0.45:1}}>
+                            <div style={{display:"flex",alignItems:"center",gap:10}}>
+                              <div onClick={()=>toggleDef(d.id,ym)}
+                                style={{width:26,height:26,borderRadius:13,flexShrink:0,
+                                  border:isPaid?"none":"2px solid #D1D1D6",
+                                  background:isPaid?"#34C759":isNext?"rgba(175,82,222,0.12)":"transparent",
+                                  cursor:"pointer",display:"flex",alignItems:"center",
+                                  justifyContent:"center",transition:"all 0.2s",
+                                  boxShadow:isPaid?"0 2px 6px rgba(52,199,89,0.35)":isNext?"0 0 0 2px rgba(175,82,222,0.3)":"none"}}>
+                                {isPaid&&<span style={{color:"#fff",fontSize:13,fontWeight:800}}>✓</span>}
+                                {isNext&&!isPaid&&<span style={{color:"#AF52DE",fontSize:11,fontWeight:800}}>·</span>}
+                              </div>
+                              <div>
+                                <p style={{color:isPaid?"#8E8E93":"#1C1C1E",fontSize:13,fontWeight:600,margin:0,
+                                  textDecoration:isPaid?"line-through":"none"}}>
+                                  Cuota {idx+1} · {monthLabel(ym)}
+                                </p>
+                                {isNext&&<p style={{color:"#AF52DE",fontSize:10,fontWeight:700,margin:"1px 0 0"}}>← pendiente</p>}
+                              </div>
+                            </div>
+                            <p style={{color:isPaid?"#8E8E93":"#1C1C1E",fontSize:13,fontWeight:700,margin:0,
+                              textDecoration:isPaid?"line-through":"none"}}>{MX(d.monthlyAmt)}</p>
+                          </div>
+                        );
+                      })}
                     </div>
                   )}
                 </div>
